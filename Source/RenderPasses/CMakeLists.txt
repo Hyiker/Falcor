@@ -1,5 +1,6 @@
 add_subdirectory(AccumulatePass)
 add_subdirectory(BlitPass)
+add_subdirectory(BlurPass)
 add_subdirectory(BSDFOptimizer)
 add_subdirectory(BSDFViewer)
 add_subdirectory(DebugPasses)
