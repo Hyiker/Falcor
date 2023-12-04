@@ -165,6 +165,7 @@ namespace Falcor
     Scene::Scene(ref<Device> pDevice, SceneData&& sceneData)
         : mpDevice(pDevice)
     {
+        rawSceneData = sceneData;
         // Copy/move scene data to member variables.
         mPath = sceneData.path;
         mRenderSettings = sceneData.renderSettings;

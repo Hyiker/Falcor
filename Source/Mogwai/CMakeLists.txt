@@ -3,6 +3,8 @@ add_falcor_executable(Mogwai)
 target_sources(Mogwai PRIVATE
     AppData.cpp
     AppData.h
+    HttpServer.cpp
+    HttpServer.h
     Mogwai.cpp
     Mogwai.h
     MogwaiScripting.cpp
