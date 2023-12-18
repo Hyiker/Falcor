@@ -660,6 +660,14 @@ void Texture::uploadInitData(RenderContext* pRenderContext, const void* pData, b
         pRenderContext->updateTextureData(this, pData);
     }
 
+    if(rawData != nullptr)
+    {
+        std::free(rawData);
+        rawData = nullptr;
+    }
+    rawData = std::malloc(mWidth * mHeight * getFormatBytesPerBlock(mFormat));
+    std::memcpy(rawData, pData, mWidth * mHeight * getFormatBytesPerBlock(mFormat));
+
     if (autoGenMips)
     {
         generateMips(pRenderContext);

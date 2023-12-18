@@ -331,6 +331,8 @@ public:
      */
     bool compareDesc(const Texture* pOther) const;
 
+    void* rawData = nullptr;
+
 protected:
     void uploadInitData(RenderContext* pRenderContext, const void* pData, bool autoGenMips);
 
