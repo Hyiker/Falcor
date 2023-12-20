@@ -331,7 +331,7 @@ public:
      */
     bool compareDesc(const Texture* pOther) const;
 
-    void* rawData = nullptr;
+    std::vector<uint8_t> rawDataCompressed{};
 
 protected:
     void uploadInitData(RenderContext* pRenderContext, const void* pData, bool autoGenMips);

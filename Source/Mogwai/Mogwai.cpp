@@ -64,7 +64,7 @@ Renderer::Renderer(const SampleAppConfig& config, const Options& options) : Samp
 {
     if (options.serverPort > 0)
     {
-        mpHttpServer = std::make_unique<HttpServer>(this, options.serverPort);
+        mpHttpServer = std::make_unique<WebServer>(this, options.serverPort);
         mpHttpServer->run();
     }
     setActivePythonRenderGraphDevice(getDevice());

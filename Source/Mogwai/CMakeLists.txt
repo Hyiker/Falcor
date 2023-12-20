@@ -1,10 +1,13 @@
+find_package(Boost COMPONENTS system REQUIRED)
+link_directories(${Boost_LIBRARY_DIRS})
+
 add_falcor_executable(Mogwai)
 
 target_sources(Mogwai PRIVATE
     AppData.cpp
     AppData.h
-    HttpServer.cpp
-    HttpServer.h
+    WebServer.cpp
+    WebServer.h
     Mogwai.cpp
     Mogwai.h
     MogwaiScripting.cpp
@@ -19,6 +22,10 @@ target_sources(Mogwai PRIVATE
     Extensions/Profiler/TimingCapture.h
 )
 
-target_link_libraries(Mogwai PRIVATE args)
+
+target_include_directories(Mogwai PRIVATE ${Boost_INCLUDE_DIRS})
+target_link_libraries(Mogwai PRIVATE ${Boost_SYSTEM_LIBRARY})
+
+target_link_libraries(Mogwai PRIVATE args zlib)
 
 target_source_group(Mogwai "/")

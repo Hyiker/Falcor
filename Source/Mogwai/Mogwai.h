@@ -31,7 +31,7 @@
 #include "Falcor.h"
 #include "RenderGraph/RenderGraph.h"
 #include "Scene/SceneBuilder.h"
-#include "HttpServer.h"
+#include "WebServer.h"
 
 namespace Falcor
 {
@@ -215,7 +215,7 @@ public:
     void handleGamepadInput(float deltaTimeSeconds);
 
     // http server for scene streaming
-    std::unique_ptr<HttpServer> mpHttpServer = nullptr;
+    std::unique_ptr<WebServer> mpHttpServer = nullptr;
 };
 
 #define MOGWAI_EXTENSION(Name)                     \

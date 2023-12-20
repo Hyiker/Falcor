@@ -26,23 +26,23 @@
  # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  **************************************************************************/
 #include "Texture.h"
-#include "Device.h"
-#include "Formats.h"
-#include "RenderContext.h"
-#include "GFXHelpers.h"
-#include "GFXAPI.h"
-#include "PythonHelpers.h"
+#include <zlib.h>
+#include <mutex>
 #include "Core/Error.h"
 #include "Core/ObjectPython.h"
-#include "Utils/Logger.h"
-#include "Utils/Threading.h"
-#include "Utils/Math/Common.h"
+#include "Core/Pass/FullScreenPass.h"
+#include "Device.h"
+#include "Formats.h"
+#include "GFXAPI.h"
+#include "GFXHelpers.h"
+#include "PythonHelpers.h"
+#include "RenderContext.h"
 #include "Utils/Image/ImageIO.h"
+#include "Utils/Logger.h"
+#include "Utils/Math/Common.h"
 #include "Utils/Scripting/ScriptBindings.h"
 #include "Utils/Scripting/ndarray.h"
-#include "Core/Pass/FullScreenPass.h"
-
-#include <mutex>
+#include "Utils/Threading.h"
 
 namespace Falcor
 {
@@ -659,14 +659,22 @@ void Texture::uploadInitData(RenderContext* pRenderContext, const void* pData, b
     {
         pRenderContext->updateTextureData(this, pData);
     }
+    rawDataCompressed.clear();
 
-    if(rawData != nullptr)
+    if (pData != nullptr)
     {
-        std::free(rawData);
-        rawData = nullptr;
+        uint32_t rawSize = mWidth * mHeight * getFormatBytesPerBlock(mFormat);
+
+        uLongf compressedSize = compressBound(rawSize);
+        rawDataCompressed.resize(compressedSize);
+        int result = compress2(rawDataCompressed.data(), &compressedSize, (const Bytef*)pData, rawSize, Z_BEST_COMPRESSION);
+
+        if (result != Z_OK)
+        {
+            throw std::runtime_error("Failed to compress buffer");
+        }
+        rawDataCompressed.resize(compressedSize);
     }
-    rawData = std::malloc(mWidth * mHeight * getFormatBytesPerBlock(mFormat));
-    std::memcpy(rawData, pData, mWidth * mHeight * getFormatBytesPerBlock(mFormat));
 
     if (autoGenMips)
     {
