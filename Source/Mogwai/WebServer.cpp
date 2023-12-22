@@ -128,7 +128,7 @@ std::vector<char> createMeshBuffer(const Renderer* renderer)
     return std::move(buffer);
 }
 
-std::vector<char> createMaterialBuffer(const Renderer* renderer)
+std::vector<char> createMaterialBuffer(const Renderer* renderer, int offset)
 {
     auto scene = renderer->mpScene;
     if (!scene)
@@ -138,12 +138,27 @@ std::vector<char> createMaterialBuffer(const Renderer* renderer)
     }
     /* scene material */
     std::vector<char> materialBuffer(4); // materialCount: 4 bytes
-    int materialSize = scene->getMaterials().size();
+    int materialTotalSize = scene->getMaterials().size();
+    constexpr int materialPageCount = 10;
+    int materialPageSize = std::ceil(float(materialTotalSize) / materialPageCount);
+    int startIndex = offset * materialPageSize;
+    int materialSize = std::min(std::max(0, materialTotalSize - startIndex), materialPageSize);
     memcpy(materialBuffer.data(), &materialSize, sizeof(int));
     int materialBufferOffset = 4;
-    std::unordered_map<Falcor::Texture*, uint32_t> textureMap;
-    for (const auto& material : scene->getMaterials())
+    Falcor::logInfo(
+        "material page: {}, materialPageSize: {}, materialTotalSize: {}, materialSize: {}",
+        offset,
+        materialPageSize,
+        materialTotalSize,
+        materialSize
+    );
+    if (offset < 0)
     {
+        return std::move(materialBuffer);
+    }
+    for (int j = 0; j < materialSize; j++)
+    {
+        auto material = scene->getMaterials()[j + startIndex];
         int nTextures = 0;
         int headerOffset = materialBufferOffset;
         materialBufferOffset += 4; // nTextures: 4 bytes
@@ -193,76 +208,17 @@ std::vector<char> createMaterialBuffer(const Renderer* renderer)
     return std::move(materialBuffer);
 }
 
-std::vector<char> createMeshAndMaterialBuffer(const Renderer* renderer)
-{
-    auto buffer = createMeshBuffer(renderer);
-    auto materialBuffer = createMaterialBuffer(renderer);
-    buffer.insert(buffer.end(), std::make_move_iterator(materialBuffer.begin()), std::make_move_iterator(materialBuffer.end()));
-
-    return std::move(buffer);
-}
-WebServer::WebServer(const Renderer* renderer, uint16_t port) : mpRenderer(renderer), mPort(port)
-{
-    mServer.Get(
-        "/scene",
-        [renderer](const httplib::Request& req, httplib::Response& res)
-        {
-            Falcor::logInfo("HTTP GET /scene start");
-            if (renderer == nullptr)
-            {
-                Falcor::logInfo("HTTP GET /scene renderer is null");
-                res.status = 500;
-                return;
-            }
-            const auto& scene = renderer->getScene();
-            if (!scene)
-            {
-                Falcor::logInfo("HTTP GET /scene scene is null");
-                res.status = 500;
-                return;
-            }
-            auto buffer = createMeshAndMaterialBuffer(renderer);
-            res.set_content(buffer.data(), buffer.size(), "application/octet-stream");
-            res.set_header("Access-Control-Allow-Headers", "X-Requested-With, Content-Type, Accept");
-            res.set_header("Access-Control-Allow-Origin", "*");
-            Falcor::logInfo("HTTP GET /scene size: {} bytes", buffer.size());
-            Falcor::logInfo("HTTP GET /scene end");
-        }
-    );
-    mServer.Get(
-        "/camera",
-        [renderer](const httplib::Request& req, httplib::Response& res)
-        {
-            Falcor::logInfo("HTTP GET /camera start");
-
-            auto buffer = createCameraBuffer(renderer);
-            if (buffer.empty())
-            {
-                res.status = 500;
-                return;
-            }
-            res.set_content(buffer.data(), buffer.size(), "application/octet-stream");
-            res.set_header("Access-Control-Allow-Headers", "X-Requested-With, Content-Type, Accept");
-            res.set_header("Access-Control-Allow-Origin", "*");
-            Falcor::logInfo("HTTP GET /camera size: {} bytes", buffer.size());
-            Falcor::logInfo("HTTP GET /camera end");
-        }
-    );
-}
+WebServer::WebServer(const Renderer* renderer, uint16_t port) : mpRenderer(renderer), mPort(port) {}
 
 WebServer::~WebServer()
 {
-    mServer.stop();
     mpWSThread->detach();
-    mpHttpThread->join();
-    Falcor::logInfo("Stopping HTTP server");
+    Falcor::logInfo("Stopping Web server");
 }
 void WebServer::run()
 {
     const std::string host = "0.0.0.0";
     Falcor::logInfo("Starting HTTP server on {}:{}", host, mPort);
-    mpHttpThread = std::make_unique<std::thread>([this, &host]() { mServer.listen(host, mPort); });
-    mServer.wait_until_ready();
 
     auto const wsAddress = net::ip::make_address(host);
     auto const wsPort = static_cast<unsigned short>(mPort + 1);
@@ -322,11 +278,11 @@ void WebServer::run()
                                     continue;
                                 }
                                 memcpy(&pack.header, buffer.data().data(), sizeof(DataPackHeader));
-                                // if (pack.header.dataSizeInBytes > 0)
-                                // {
-                                //     pack.data = new char[pack.header.dataSizeInBytes];
-                                //     memcpy(pack.data, buffer.data().data() + sizeof(DataPackHeader), pack.header.dataSizeInBytes);
-                                // }
+                                const char* pData = nullptr;
+                                if (pack.header.dataSizeInBytes > 0)
+                                {
+                                    pData = (const char*)buffer.data().data() + sizeof(DataPackHeader);
+                                }
 
                                 Falcor::logInfo(
                                     "WS message eventId: {}, eventType: {}, dataSizeInBytes: {}",
@@ -344,7 +300,10 @@ void WebServer::run()
                                 }
                                 case EventType::FetchMaterial:
                                 {
-                                    dataBuffer = createMaterialBuffer(mpRenderer);
+                                    int offset = 0;
+                                    memcpy(&offset, pData, sizeof(int));
+                                    Falcor::logInfo("FetchMaterial offset: {}", offset);
+                                    dataBuffer = createMaterialBuffer(mpRenderer, offset);
                                     break;
                                 }
                                 case EventType::CameraUpdate:

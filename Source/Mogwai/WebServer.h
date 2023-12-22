@@ -1,5 +1,4 @@
 #pragma once
-#include <httplib.h>
 #include <boost/asio/ip/tcp.hpp>
 #include <cinttypes>
 #include <memory>
@@ -18,8 +17,7 @@ public:
 private:
     const Renderer* mpRenderer;
     uint16_t mPort;
-    httplib::Server mServer;
-    std::unique_ptr<std::thread> mpHttpThread, mpWSThread;
+    std::unique_ptr<std::thread> mpWSThread;
     std::unique_ptr<boost::asio::io_context> mpIoContext;
     std::unique_ptr<boost::asio::ip::tcp::acceptor> mpAcceptor;
 };
