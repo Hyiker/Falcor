@@ -32,16 +32,16 @@
 // SPDX: Apache-2.0
 
 #include "Parser.h"
-#include "Helpers.h"
 #include "Core/Error.h"
 #include "Core/Platform/OS.h"
+#include "Helpers.h"
 #include "Utils/Logger.h"
 
 #include <fast_float/fast_float.h>
 
 #include <atomic>
-#include <utility>
 #include <charconv>
+#include <utility>
 
 namespace Falcor::pbrt
 {
@@ -628,7 +628,7 @@ void parse(ParserTarget& target, std::unique_ptr<Tokenizer> tokenizer)
             {
                 basicParamListEntrypoint(&ParserTarget::onIntegrator, tok->loc);
             }
-            else if (tok->token == "Include")
+            else if (tok->token == "Include" || tok->token == "Import")
             {
                 Token filenameToken = *nextToken(TokenRequired);
                 std::string filename = toString(dequoteString(filenameToken));

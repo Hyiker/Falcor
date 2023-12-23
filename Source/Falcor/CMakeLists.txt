@@ -963,7 +963,7 @@ endif()
 
 target_link_libraries(Falcor
     PUBLIC
-        fmt pybind11::embed Vulkan::Headers
+        assimp fmt pybind11::embed Vulkan::Headers
         slang slang-gfx
         imgui imgui_addons
         nanovdb

@@ -16,3 +16,6 @@
 [submodule "external/vulkan-headers"]
 	path = external/vulkan-headers
 	url = https://github.com/KhronosGroup/Vulkan-Headers
+[submodule "external/assimp"]
+	path = external/assimp
+	url = https://github.com/Hyiker/assimp.git

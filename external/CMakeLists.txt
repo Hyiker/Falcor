@@ -29,6 +29,7 @@ set_target_properties(fmt PROPERTIES
     POSITION_INDEPENDENT_CODE ON
     FOLDER "Libraries"
 )
+target_compile_definitions(fmt PUBLIC _SILENCE_ALL_MS_EXT_DEPRECATION_WARNINGS)
 
 # glfw
 message(STATUS "Configure glfw")
@@ -186,21 +187,31 @@ endif()
 
 # assimp
 # Note: For better performance in Debug builds we always use the release version.
-if(FALCOR_WINDOWS)
-    add_library(assimp SHARED IMPORTED GLOBAL)
-    set_target_properties(assimp PROPERTIES
-        INTERFACE_INCLUDE_DIRECTORIES ${FALCOR_DEPS_DIR}/include
-        IMPORTED_IMPLIB ${FALCOR_DEPS_DIR}/lib/assimp-vc143-mt.lib
-        IMPORTED_LOCATION ${FALCOR_DEPS_DIR}/bin/assimp-vc143-mt.dll
-    )
-elseif(FALCOR_LINUX)
-    add_library(assimp SHARED IMPORTED GLOBAL)
-    set_target_properties(assimp PROPERTIES
-        INTERFACE_INCLUDE_DIRECTORIES ${FALCOR_DEPS_DIR}/include
-        IMPORTED_LOCATION_RELEASE ${FALCOR_DEPS_DIR}/lib/libassimp.so
-        IMPORTED_LOCATION_DEBUG ${FALCOR_DEPS_DIR}/debug/lib/libassimpd.so
-    )
-endif()
+# if(FALCOR_WINDOWS)
+#     add_library(assimp SHARED IMPORTED GLOBAL)
+#     set_target_properties(assimp PROPERTIES
+#         INTERFACE_INCLUDE_DIRECTORIES ${FALCOR_DEPS_DIR}/include
+#         IMPORTED_IMPLIB ${FALCOR_DEPS_DIR}/lib/assimp-vc143-mt.lib
+#         IMPORTED_LOCATION ${FALCOR_DEPS_DIR}/bin/assimp-vc143-mt.dll
+#     )
+# elseif(FALCOR_LINUX)
+#     add_library(assimp SHARED IMPORTED GLOBAL)
+#     set_target_properties(assimp PROPERTIES
+#         INTERFACE_INCLUDE_DIRECTORIES ${FALCOR_DEPS_DIR}/include
+#         IMPORTED_LOCATION_RELEASE ${FALCOR_DEPS_DIR}/lib/libassimp.so
+#         IMPORTED_LOCATION_DEBUG ${FALCOR_DEPS_DIR}/debug/lib/libassimpd.so
+#     )
+# endif()
+
+message(STATUS "Configure assimp")
+set(ASSIMP_INSTALL OFF)
+set(BUILD_SHARED_LIBS ON)
+set(ASSIMP_NO_EXPORT ON)
+set(ASSIMP_BUILD_ASSIMP_VIEW OFF)
+set(ASSIMP_RUNTIME_OUTPUT_DIRECTORY "${FALCOR_RUNTIME_OUTPUT_DIRECTORY}")
+set(ASSIMP_LIBRARY_OUTPUT_DIRECTORY "${FALCOR_LIBRARY_OUTPUT_DIRECTORY}")
+
+add_subdirectory(assimp)
 
 # FreeImage
 if(FALCOR_WINDOWS)
