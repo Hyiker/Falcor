@@ -166,7 +166,7 @@ public:
 
     void removeActiveGraph();
     void loadSceneDialog();
-    void loadScene(std::filesystem::path path, SceneBuilder::Flags buildFlags = SceneBuilder::Flags::Default);
+    void loadScene(std::filesystem::path path, SceneBuilder::Flags buildFlags = SceneBuilder::Flags::Force32BitIndices);
     void unloadScene();
     void setScene(const ref<Scene>& pScene);
     ref<Scene> getScene() const;

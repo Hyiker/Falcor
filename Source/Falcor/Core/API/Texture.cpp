@@ -661,19 +661,28 @@ void Texture::uploadInitData(RenderContext* pRenderContext, const void* pData, b
     }
     rawDataCompressed.clear();
 
-    if (pData != nullptr)
+    if (pData != nullptr && mFormat != ResourceFormat::BC1UnormSrgb && mFormat != ResourceFormat::BC1Unorm &&
+        mFormat != ResourceFormat::BC1UnormSrgb && mFormat != ResourceFormat::BC2Unorm && mFormat != ResourceFormat::BC2UnormSrgb &&
+        mFormat != ResourceFormat::BC3Unorm && mFormat != ResourceFormat::BC3UnormSrgb && mFormat != ResourceFormat::BC4Unorm &&
+        mFormat != ResourceFormat::BC4Snorm && mFormat != ResourceFormat::BC5Unorm && mFormat != ResourceFormat::BC5Snorm &&
+        mFormat != ResourceFormat::BC6HS16 && mFormat != ResourceFormat::BC6HU16 && mFormat != ResourceFormat::BC7Unorm &&
+        mFormat != ResourceFormat::BC7UnormSrgb)
     {
         uint32_t rawSize = mWidth * mHeight * getFormatBytesPerBlock(mFormat);
 
         uLongf compressedSize = compressBound(rawSize);
         rawDataCompressed.resize(compressedSize);
-        int result = compress2(rawDataCompressed.data(), &compressedSize, (const Bytef*)pData, rawSize, Z_BEST_COMPRESSION);
+        int result = compress2(rawDataCompressed.data(), &compressedSize, (const Bytef*)pData, rawSize, Z_DEFAULT_COMPRESSION);
 
         if (result != Z_OK)
         {
-            throw std::runtime_error("Failed to compress buffer");
+            logError("Failed to compress buffer");
+            rawDataCompressed.clear();
         }
-        rawDataCompressed.resize(compressedSize);
+        else
+        {
+            rawDataCompressed.resize(compressedSize);
+        }
     }
 
     if (autoGenMips)
