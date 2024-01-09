@@ -11,6 +11,7 @@ class WebServer
 {
 public:
     WebServer(const Renderer* renderer, uint16_t port = 8080U);
+    void sendCameraUpdate() const;
     ~WebServer();
     void run();
 

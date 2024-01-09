@@ -176,8 +176,8 @@ std::vector<char> createMaterialBuffer(const Renderer* renderer, int offset)
                 Falcor::logInfo("Slot {} has texture", Falcor::to_string(static_cast<Material::TextureSlot>(i)));
                 ++nTextures;
                 int textureSize = 4 + 4 + 4 + 4 + 4; // slot + format + width + height + compressed size
-                int textureRawDataSizeInBytes = texture->getWidth() * texture->getHeight() * getFormatBytesPerBlock(texture->getFormat());
-                textureSize += textureRawDataSizeInBytes;
+                uint32_t compressedSize = texture->rawDataCompressed.size();
+                textureSize += compressedSize;
                 materialBuffer.resize(materialBufferOffset + textureSize);
                 memcpy(materialBuffer.data() + materialBufferOffset, &i, sizeof(int));
                 materialBufferOffset += 4;
@@ -190,7 +190,6 @@ std::vector<char> createMaterialBuffer(const Renderer* renderer, int offset)
                 materialBufferOffset += 4;
                 memcpy(materialBuffer.data() + materialBufferOffset, &height, sizeof(int));
                 materialBufferOffset += 4;
-                uint32_t compressedSize = texture->rawDataCompressed.size();
                 memcpy(materialBuffer.data() + materialBufferOffset, &compressedSize, sizeof(uint32_t));
                 materialBufferOffset += 4;
                 memcpy(materialBuffer.data() + materialBufferOffset, texture->rawDataCompressed.data(), compressedSize);
@@ -209,6 +208,30 @@ std::vector<char> createMaterialBuffer(const Renderer* renderer, int offset)
 }
 
 WebServer::WebServer(const Renderer* renderer, uint16_t port) : mpRenderer(renderer), mPort(port) {}
+std::unique_ptr<websocket::stream<tcp::socket>> mpWs;
+std::mutex websocketMutex;
+std::atomic_uint32_t nFrame = 0;
+void WebServer::sendCameraUpdate() const
+{
+    if (mpWs)
+    {
+        std::lock_guard<std::mutex> lock(websocketMutex);
+        std::vector<char> dataBuffer;
+        dataBuffer = createCameraBuffer(mpRenderer);
+        std::vector<char> responseBuffer(sizeof(DataPackHeader));
+        DataPack pack{};
+        pack.header.eventId = nFrame++;
+        pack.header.eventType = EventType::CameraUpdate;
+        pack.header.dataSizeInBytes = dataBuffer.size();
+        memcpy(responseBuffer.data(), &pack.header, sizeof(DataPackHeader));
+        responseBuffer.insert(
+            responseBuffer.begin() + sizeof(DataPackHeader),
+            std::make_move_iterator(dataBuffer.begin()),
+            std::make_move_iterator(dataBuffer.end())
+        );
+        mpWs->write(net::buffer(responseBuffer.data(), responseBuffer.size()));
+    }
+}
 
 WebServer::~WebServer()
 {
@@ -248,29 +271,31 @@ void WebServer::run()
                         try
                         {
                             // Construct the stream by moving in the socket
-                            websocket::stream<tcp::socket> ws{std::move(socket)};
-                            ws.binary(true);
+                            mpWs = std::make_unique<websocket::stream<tcp::socket>>(std::move(socket));
+                            mpWs->binary(true);
                             // Set a decorator to change the Server of the handshake
-                            ws.set_option(websocket::stream_base::decorator(
+                            mpWs->set_option(websocket::stream_base::decorator(
                                 [](websocket::response_type& res)
                                 { res.set(http::field::server, std::string(BOOST_BEAST_VERSION_STRING) + " websocket-server-sync"); }
                             ));
                             // enable compression
                             websocket::permessage_deflate pmd;
                             pmd.server_enable = true;
-                            ws.set_option(pmd);
+                            mpWs->set_option(pmd);
 
                             // Accept the websocket handshake
-                            ws.accept();
+                            mpWs->accept();
 
                             for (;;)
                             {
+                                logInfo("WS server waiting for message");
                                 // This buffer will hold the incoming message
                                 beast::flat_buffer buffer;
-                                ws.binary(true);
+                                mpWs->binary(true);
 
                                 // Read a message
-                                ws.read(buffer);
+                                mpWs->read(buffer);
+                                std::lock_guard<std::mutex> lock(websocketMutex);
                                 DataPack pack{};
                                 if (buffer.size() < sizeof(DataPackHeader))
                                 {
@@ -331,7 +356,7 @@ void WebServer::run()
                                     std::make_move_iterator(dataBuffer.end())
                                 );
                                 Falcor::logInfo("WS response size: {} bytes", responseBuffer.size());
-                                ws.write(net::buffer(responseBuffer.data(), responseBuffer.size()));
+                                mpWs->write(net::buffer(responseBuffer.data(), responseBuffer.size()));
                             }
                         }
                         catch (beast::system_error const& se)

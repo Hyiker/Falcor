@@ -215,7 +215,7 @@ public:
     void handleGamepadInput(float deltaTimeSeconds);
 
     // http server for scene streaming
-    std::unique_ptr<WebServer> mpHttpServer = nullptr;
+    std::unique_ptr<WebServer> mpWebServer = nullptr;
 };
 
 #define MOGWAI_EXTENSION(Name)                     \

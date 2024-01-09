@@ -64,8 +64,8 @@ Renderer::Renderer(const SampleAppConfig& config, const Options& options) : Samp
 {
     if (options.serverPort > 0)
     {
-        mpHttpServer = std::make_unique<WebServer>(this, options.serverPort);
-        mpHttpServer->run();
+        mpWebServer = std::make_unique<WebServer>(this, options.serverPort);
+        mpWebServer->run();
     }
     setActivePythonRenderGraphDevice(getDevice());
 }
@@ -745,12 +745,17 @@ void Renderer::onFrameRender(RenderContext* pRenderContext, const ref<Fbo>& pTar
         if (mpScene)
         {
             auto sceneUpdates = mpScene->update(pRenderContext, getGlobalClock().getTime());
-
+            const auto kCameraUpdates =
+                Scene::UpdateFlags::CameraMoved | Scene::UpdateFlags::CameraPropertiesChanged | Scene::UpdateFlags::CameraSwitched;
             // Accumulate scene update flags for each graph.
             // The update flags are passed to the active graph, or accumulated until a graph becomes active to avoid missing updates.
             for (auto& g : mGraphs)
             {
                 g.sceneUpdates |= sceneUpdates;
+            }
+            if (static_cast<int>(sceneUpdates | kCameraUpdates) != 0 && mpWebServer)
+            {
+                mpWebServer->sendCameraUpdate();
             }
         }
 
