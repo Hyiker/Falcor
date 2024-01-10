@@ -1422,8 +1422,6 @@ Shape createShape(BuilderContext& ctx, const ShapeSceneEntity& entity)
     const auto& type = entity.name;
     const auto& params = entity.params;
 
-    warnUnsupportedParameters(params, {"alpha"});
-
     Shape shape;
 
     if (type == "sphere")
@@ -1662,6 +1660,17 @@ Shape createShape(BuilderContext& ctx, const ShapeSceneEntity& entity)
         }
         const SceneEntity& areaLightEntity = ctx.scene.getAreaLight(entity.lightIndex);
         createAreaLight(ctx, areaLightEntity, shape.pMaterial);
+    }
+    Float alpha = params.getFloat("alpha", 1.0f);
+    if (alpha != 1.f)
+    {
+        auto pMaterial = shape.pMaterial;
+        pMaterial->setAlphaMode(AlphaMode::Mask);
+        pMaterial->setAlphaThreshold(1.h);
+        if (auto pStandardMaterial = dynamic_ref_cast<Falcor::StandardMaterial>(pMaterial))
+        {
+            pStandardMaterial->setBaseColor(float4(pStandardMaterial->getBaseColor3(), alpha));
+        }
     }
 
     return shape;

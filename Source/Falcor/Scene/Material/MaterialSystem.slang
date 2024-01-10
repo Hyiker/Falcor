@@ -369,7 +369,8 @@ struct MaterialSystem
         if (header.getAlphaMode() != AlphaMode::Mask) return false;
 
         SamplerState s = getTextureSampler(header.getDefaultTextureSamplerID());
-        float alpha = sampleTexture(header.getAlphaTextureHandle(), s, v.texC, float4(1.f), lod).a;
+        float uniformAlpha = isBasicMaterial(materialID) ? getBasicMaterialData(materialID).baseColor.a : 1.f;
+        float alpha = sampleTexture(header.getAlphaTextureHandle(), s, v.texC, float4(uniformAlpha), lod).a;
         float alphaThreshold = header.getAlphaThreshold();
 
         return evalAlphaTest(alpha, alphaThreshold, v.posW);

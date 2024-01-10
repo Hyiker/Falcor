@@ -456,6 +456,7 @@ void SceneDebugger::renderPixelDataUI(Gui::Widgets& widget)
             text += fmt::format("basicMaterial: {}\n", header.isBasicMaterial());
             text += fmt::format("lightProfileEnabled: {}\n", header.isLightProfileEnabled());
             text += fmt::format("deltaSpecular: {}\n", header.isDeltaSpecular());
+            text += fmt::format("alphaTextureMode: {}\n", (int)header.getAlphaTextureHandle().getMode());
             g.text(text);
         }
     }
