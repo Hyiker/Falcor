@@ -53,14 +53,18 @@ namespace Falcor
             \param[in] pDevice GPU device.
             \param[in] texture The environment map texture.
         */
-        static ref<EnvMap> create(ref<Device> pDevice, const ref<Texture>& texture);
+        static ref<EnvMap> create(ref<Device> pDevice, const ref<Texture>& texture, EnvMapParamType type = EnvMapParamType::LatLong);
 
         /** Create a new environment map from file.
             \param[in] pDevice GPU device.
             \param[in] path The environment map texture file path (absolute or relative to working directory).
             \return A new object, or nullptr if the environment map failed to load.
         */
-        static ref<EnvMap> createFromFile(ref<Device> pDevice, const std::filesystem::path& path);
+        static ref<EnvMap> createFromFile(
+            ref<Device> pDevice,
+            const std::filesystem::path& path,
+            EnvMapParamType type = EnvMapParamType::LatLong
+        );
 
         /** Render the GUI.
         */
@@ -87,6 +91,10 @@ namespace Falcor
         */
         void setTint(const float3& tint);
 
+        /** Set parametrization type.
+        */
+        void setParameterizationType(EnvMapParamType type);
+
         /** Get intensity.
         */
         float getIntensity() const { return mData.intensity; }
@@ -94,6 +102,10 @@ namespace Falcor
         /** Get color tint.
         */
         float3 getTint() const { return mData.tint; }
+
+        /** Get parametrization type.
+        */
+        EnvMapParamType getParameterizationType() const { return static_cast<EnvMapParamType>(mData.parametrizationType); }
 
         /** Get the file path of the environment map texture.
         */
@@ -127,7 +139,7 @@ namespace Falcor
         uint64_t getMemoryUsageInBytes() const;
 
     protected:
-        EnvMap(ref<Device> pDevice, const ref<Texture>& texture);
+        EnvMap(ref<Device> pDevice, const ref<Texture>& texture, EnvMapParamType type);
 
         ref<Device>             mpDevice;
         ref<Texture>            mpEnvMap;           ///< Loaded environment map (RGB).

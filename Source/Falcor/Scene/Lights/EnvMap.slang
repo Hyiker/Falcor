@@ -68,17 +68,17 @@ struct EnvMap
     }
 
     /** Transform direction in local space to uv coordinates.
-    */
+     */
     float2 localToUv(float3 dir)
     {
-        return world_to_latlong_map(dir);
+        return data.parametrizationType == uint(EnvMapParamType::LatLong) ? world_to_latlong_map(dir) : ndir_to_oct_equal_area_unorm(dir).yx;
     }
 
     /** Transform uv coordinates to direction in local space.
-    */
+     */
     float3 uvToLocal(float2 uv)
     {
-        return latlong_map_to_world(uv);
+        return data.parametrizationType == uint(EnvMapParamType::LatLong) ? latlong_map_to_world(uv) : oct_to_ndir_equal_area_unorm(uv.yx);
     }
 
     /** Transform direction in world space to uv coordinates.

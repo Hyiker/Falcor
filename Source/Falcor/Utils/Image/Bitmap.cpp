@@ -328,7 +328,7 @@ Bitmap::UniqueConstPtr Bitmap::createFromFile(const std::filesystem::path& path,
         format = ResourceFormat::BGRA8Unorm;
         break;
     case 24:
-        format = ResourceFormat::BGRX8Unorm;
+        format = ResourceFormat::BGRX8UnormSrgb;
         break;
     case 16:
         format = (FreeImage_GetImageType(pDib) == FIT_UINT16) ? ResourceFormat::R16Unorm : ResourceFormat::RG8Unorm;

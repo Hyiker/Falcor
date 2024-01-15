@@ -83,7 +83,6 @@
 #include "Scene/Material/PBRT/PBRTDielectricMaterial.h"
 #include "Scene/Material/PBRT/PBRTDiffuseTransmissionMaterial.h"
 #include "Scene/Curves/CurveTessellation.h"
-
 #include <pybind11/pybind11.h>
 
 #include <unordered_map>
@@ -723,15 +722,9 @@ Light createLight(BuilderContext& ctx, const LightSceneEntity& entity)
         else if (!filename.empty())
         {
             auto path = ctx.resolver(filename);
-            auto pOctTexture = Falcor::Texture::createFromFile(ctx.builder.getDevice(), path, false, false);
-            // TODO: Use equal-area octahedral parametrization when env map supports it.
-            logWarning(
-                entity.loc,
-                "Environment map is converted from equal-area octahedral to lat-long parametrization. Exact results cannot be expected."
-            );
-            EnvMapConverter envMapConverter(ctx.builder.getDevice());
-            auto pLatLongTexture = envMapConverter.convertEqualAreaOctToLatLong(ctx.builder.getDevice()->getRenderContext(), pOctTexture);
-            auto pEnvMap = Falcor::EnvMap::create(ctx.builder.getDevice(), pLatLongTexture);
+            bool isSrgb = !(path.extension().string() == ".exr"); // we see all non-hdr file as srgb storage
+            auto pOctTexture = Falcor::Texture::createFromFile(ctx.builder.getDevice(), path, false, isSrgb);
+            auto pEnvMap = Falcor::EnvMap::create(ctx.builder.getDevice(), pOctTexture, EnvMapParamType::EquiAreaOctahedral);
             pEnvMap->setIntensity(scale);
 
             float3 rotation;

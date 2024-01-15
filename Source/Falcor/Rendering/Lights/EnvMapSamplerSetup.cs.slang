@@ -60,9 +60,15 @@ void main(uint3 dispatchThreadID : SV_DispatchThreadID)
             uint2 samplePos = pixel * numSamples + uint2(x, y);
             float2 p = ((float2)samplePos + 0.5f) / outputDimInSamples;
 
+#ifdef LATLONG_MAP
             // Convert p to (u,v) coordinate in latitude-longitude map.
             float3 dir = oct_to_ndir_equal_area_unorm(p);
             float2 uv = world_to_latlong_map(dir);
+#endif
+#ifdef OCTAHEDRAL_MAP
+            // Convert p to (u,v) coordinate in octahedral map.
+            float2 uv = p;
+#endif
 
             // Accumulate the radiance from this sample.
             float3 radiance = gEnvMap.SampleLevel(gEnvSampler, uv, 0).rgb;

@@ -47,8 +47,18 @@ namespace Falcor
     {
         FALCOR_ASSERT(pEnvMap);
 
+        DefineList defines;
+        if (pEnvMap->getParameterizationType() == EnvMapParamType::LatLong)
+        {
+            defines.add("LATLONG_MAP");
+        }
+        else if (pEnvMap->getParameterizationType() == EnvMapParamType::EquiAreaOctahedral)
+        {
+            defines.add("OCTAHEDRAL_MAP");
+        }
+
         // Create compute program for the setup phase.
-        mpSetupPass = ComputePass::create(mpDevice, kShaderFilenameSetup, "main");
+        mpSetupPass = ComputePass::create(mpDevice, kShaderFilenameSetup, "main", defines);
 
         // Create sampler.
         Sampler::Desc samplerDesc;

@@ -30,15 +30,25 @@
 
 BEGIN_NAMESPACE_FALCOR
 
+/** Types of envmap parameterization.
+ */
+
+enum class EnvMapParamType : uint32_t
+{
+    LatLong,            ///< lat-long parametrization
+    EquiAreaOctahedral, ///< equal-area octahedral parametrization
+};
+
 /** This is a host/device structure that describes the environment map proeprties.
-*/
+ */
 struct EnvMapData
 {
-    float3x4    transform;              ///< Local to world transform.
-    float3x4    invTransform;           ///< World to local transform.
+    float3x4 transform;    ///< Local to world transform.
+    float3x4 invTransform; ///< World to local transform.
 
-    float3      tint = {1.f, 1.f, 1.f}; ///< Color tint
-    float       intensity = 1.f;        ///< Radiance scale
+    float3 tint = { 1.f, 1.f, 1.f };                               ///< Color tint
+    uint32_t parametrizationType = uint(EnvMapParamType::LatLong); ///< EnvMapType
+    float intensity = 1.f;                                         ///< Radiance scale
 };
 
 END_NAMESPACE_FALCOR

@@ -33,17 +33,17 @@
 
 namespace Falcor
 {
-    ref<EnvMap> EnvMap::create(ref<Device> pDevice, const ref<Texture>& pTexture)
+    ref<EnvMap> EnvMap::create(ref<Device> pDevice, const ref<Texture>& pTexture, EnvMapParamType type)
     {
-        return ref<EnvMap>(new EnvMap(pDevice, pTexture));
+        return ref<EnvMap>(new EnvMap(pDevice, pTexture, type));
     }
 
-    ref<EnvMap> EnvMap::createFromFile(ref<Device> pDevice, const std::filesystem::path& path)
+    ref<EnvMap> EnvMap::createFromFile(ref<Device> pDevice, const std::filesystem::path& path, EnvMapParamType type)
     {
         // Load environment map from file. Set it to generate mips and use linear color.
         auto pTexture = Texture::createFromFile(pDevice, path, true, false);
         if (!pTexture) return nullptr;
-        return create(pDevice, pTexture);
+        return create(pDevice, pTexture, type);
     }
 
     void EnvMap::renderUI(Gui::Widgets& widgets)
@@ -86,6 +86,11 @@ namespace Falcor
         mData.tint = tint;
     }
 
+    void EnvMap::setParameterizationType(EnvMapParamType type)
+    {
+        mData.parametrizationType = static_cast<uint32_t>(type);
+    }
+
     void EnvMap::bindShaderData(const ShaderVar& var) const
     {
         FALCOR_ASSERT(var.isValid());
@@ -116,18 +121,31 @@ namespace Falcor
         return mpEnvMap ? mpEnvMap->getTextureSizeInBytes() : 0;
     }
 
-    EnvMap::EnvMap(ref<Device> pDevice, const ref<Texture>& pTexture)
+    EnvMap::EnvMap(ref<Device> pDevice, const ref<Texture>& pTexture, EnvMapParamType type)
         : mpDevice(pDevice)
     {
         FALCOR_CHECK(mpDevice != nullptr, "'pDevice' must be a valid device");
         FALCOR_CHECK(pTexture != nullptr, "'pTexture' must be a valid texture");
+        if (type == EnvMapParamType::EquiAreaOctahedral)
+        {
+            FALCOR_CHECK(pTexture->getWidth() == pTexture->getHeight(), "EquiAreaOctahedral environment map must be square");
+        }
 
         mpEnvMap = pTexture;
+        mData.parametrizationType = uint32_t(type);
 
         // Create sampler.
         // The lat-long map wraps around horizontally, but not vertically. Set the sampler to only wrap in U.
+        // TODO: find a good way to apply octahedral wrapping to the sampler
         Sampler::Desc samplerDesc;
-        samplerDesc.setFilterMode(TextureFilteringMode::Linear, TextureFilteringMode::Linear, TextureFilteringMode::Linear);
+        if (type == EnvMapParamType::LatLong)
+        {
+            samplerDesc.setFilterMode(TextureFilteringMode::Linear, TextureFilteringMode::Linear, TextureFilteringMode::Linear);
+        }
+        else
+        {
+            samplerDesc.setFilterMode(TextureFilteringMode::Point, TextureFilteringMode::Point, TextureFilteringMode::Point);
+        }
         samplerDesc.setAddressingMode(TextureAddressingMode::Wrap, TextureAddressingMode::Clamp, TextureAddressingMode::Clamp);
         mpEnvSampler = mpDevice->createSampler(samplerDesc);
     }
