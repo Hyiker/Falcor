@@ -19,3 +19,6 @@
 [submodule "external/assimp"]
 	path = external/assimp
 	url = https://github.com/Hyiker/assimp.git
+[submodule "external/ptex"]
+	path = external/ptex
+	url = https://github.com/wdas/ptex.git

@@ -47,6 +47,7 @@ struct TextureHandle
     {
         Uniform,
         Texture,
+        PTex, // Support for WD's ptex, faceIndex packed into the UVs
 
         Count // Must be last
     };

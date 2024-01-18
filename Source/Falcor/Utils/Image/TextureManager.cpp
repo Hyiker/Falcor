@@ -663,6 +663,7 @@ TextureManager::CpuTextureHandle TextureManager::addDesc(const TextureDesc& desc
             FALCOR_THROW("Out of texture handles");
         }
         handle = CpuTextureHandle{static_cast<uint32_t>(mTextureDescs.size())};
+        handle.setIsPTex(desc.pTexture->isPTex());
         mTextureDescs.emplace_back(desc);
     }
 

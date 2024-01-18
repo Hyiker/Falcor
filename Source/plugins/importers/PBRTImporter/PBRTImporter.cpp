@@ -86,6 +86,7 @@
 #include <pybind11/pybind11.h>
 
 #include <unordered_map>
+#include <Ptexture.h>
 
 namespace Falcor
 {
@@ -742,6 +743,25 @@ Light createLight(BuilderContext& ctx, const LightSceneEntity& entity)
     return light;
 }
 
+struct : public PtexErrorHandler
+{
+    void reportError(const char* error) override { logError("{}", error); }
+} errorHandler;
+
+static Ptex::PtexCache* getPtexCache()
+{
+    static Ptex::PtexCache* cache;
+    if (!cache)
+    {
+        int maxFiles = 100;
+        size_t maxMem = 1ull << 32; // 4GB
+        bool premultiply = true;
+
+        cache = Ptex::PtexCache::create(maxFiles, maxMem, premultiply, nullptr, &errorHandler);
+    }
+    return cache;
+}
+
 FloatTexture createFloatTexture(BuilderContext& ctx, const TextureSceneEntity& entity)
 {
     auto warnUnsupported = [&]() { warnUnsupportedType(entity.loc, "Float texture", entity.name); };
@@ -955,7 +975,60 @@ SpectrumTexture createSpectrumTexture(BuilderContext& ctx, const TextureSceneEnt
     {
         // Parameters:
         // String filename, String encoding, Float scale
-        warnUnsupported();
+        const auto filename = ctx.resolver(params.getString("filename", "")).string();
+        Float scale = params.getFloat("scale", 1.f);
+        const auto encodingString = params.getString("encoding", "sRGB");
+        bool srgbEncoding = encodingString == "sRGB";
+
+        auto encodingFunc = [srgbEncoding](Float x) { return srgbEncoding ? std::pow(x, 2.2f) : x; };
+        Ptex::String error;
+        Ptex::PtexTexture* texture = getPtexCache()->get(filename.c_str(), error);
+        if (!texture)
+        {
+            logError("Error loading ptex file: {}", error.c_str());
+        }
+        else
+        {
+            int nFaces = texture->numFaces();
+            logDebug("{}: nFaces = {}", filename, nFaces);
+            const int nc = texture->numChannels();
+            texture->release();
+
+            Ptex::PtexFilter::Options opts(Ptex::PtexFilter::FilterType::f_bspline);
+            auto* filter = Ptex::PtexFilter::getFilter(texture, opts);
+
+            if (nc != 1 && nc != 3)
+            {
+                logError("Only 1 or 3 channel ptex files are supported");
+            }
+            else
+            {
+                // convert the original ptex storage to a falcor texture
+                // TODO: find a better way to work with the size limitation
+                const int width = 4096;
+                const int height = math::ceil(Float(nFaces) / width);
+                std::vector<float> data(width * height * 3);
+                for (int i = 0; i < nFaces; i++)
+                {
+                    constexpr Float filterWidth = 0.75f;
+
+                    int firstChan = 0;
+                    std::array<float, 3> result;
+                    filter->eval(result.data(), firstChan, nc, i, 0.5f, 0.5f, filterWidth, filterWidth, filterWidth, filterWidth);
+                    if (nc == 1)
+                    {
+                        result[2] = result[1] = result[0];
+                    }
+                    data[i * 3 + 0] = encodingFunc(result[0]) * scale;
+                    data[i * 3 + 1] = encodingFunc(result[1]) * scale;
+                    data[i * 3 + 2] = encodingFunc(result[2]) * scale;
+                }
+                auto pTex = ctx.builder.getDevice()->createTexture2D(width, height, ResourceFormat::RGB32Float, 1, 1, data.data());
+                pTex->setIsPTex(true);
+                spectrumTexture.texture = pTex;
+            }
+            filter->release();
+        }
     }
     else
     {
@@ -1514,6 +1587,7 @@ Shape createShape(BuilderContext& ctx, const ShapeSceneEntity& entity)
         auto P = params.getPoint3Array("P");
         auto N = params.getNormalArray("N");
         auto uv = params.getPoint2Array("uv");
+        auto faceIndices = params.getIntArray("faceIndices");
 
         if (indices.empty())
         {
@@ -1557,6 +1631,28 @@ Shape createShape(BuilderContext& ctx, const ShapeSceneEntity& entity)
                 logWarning(entity.loc, "Vertex index {} is out of bounds. Skipping.", i);
                 return {};
             }
+        }
+
+        if (!faceIndices.empty())
+        {
+            if (!uv.empty())
+            {
+                logWarning(entity.loc, "Both 'faceIndices' and 'uv' are specified. Discarding 'uv'.");
+            }
+            uv.clear();
+            std::transform(
+                faceIndices.begin(),
+                faceIndices.end(),
+                std::back_inserter(uv),
+                [](int i)
+                {
+                    const int width = 4096;
+                    int x = i % width, y = i / width;
+                    // int -> float conversion precision loss only occurs when |int| > 2^24.
+                    // y is always < 2^24, we are safe here :)
+                    return float2(x, y);
+                }
+            );
         }
 
         Falcor::TriangleMesh::VertexList vertexList(P.size());

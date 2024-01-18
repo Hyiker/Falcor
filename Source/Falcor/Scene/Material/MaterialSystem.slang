@@ -42,12 +42,13 @@ __exported import Scene.Material.VolumeProperties;
 #endif
 
 /** This struct represents the GPU-side material system.
-*/
+ */
 struct MaterialSystem
 {
-    uint materialCount;                                                         ///< Total number of materials.
-    StructuredBuffer<MaterialDataBlob> materialData;                            ///< Material parameters. The format of the data blob depends on the material type.
-    SamplerState materialSamplers[MATERIAL_SYSTEM_SAMPLER_DESC_COUNT];          ///< Sampler states for all materials. TODO: Make this an unbounded array (see #1321).
+    uint materialCount;                              ///< Total number of materials.
+    StructuredBuffer<MaterialDataBlob> materialData; ///< Material parameters. The format of the data blob depends on the material type.
+    SamplerState materialSamplers[MATERIAL_SYSTEM_SAMPLER_DESC_COUNT]; ///< Sampler states for all materials. TODO: Make this an unbounded
+                                                                       ///< array (see #1321).
 
     /// Texture resources for all materials. TODO: Make this an unbounded array (see #1321).
     Texture2D<float4> materialTextures[ArrayMax<1, MATERIAL_SYSTEM_TEXTURE_DESC_COUNT>.value];
@@ -56,7 +57,6 @@ struct MaterialSystem
     ByteAddressBuffer materialBuffers[ArrayMax<1, MATERIAL_SYSTEM_BUFFER_DESC_COUNT>.value];
 
     Texture3D<float4> materialTextures3D[ArrayMax<1, MATERIAL_SYSTEM_TEXTURE_3D_DESC_COUNT>.value];
-
 
     /**
      * When UDIMs are used, this array contains indirection from <UDIM>-1001 to materialTextures.
@@ -69,41 +69,26 @@ struct MaterialSystem
     StructuredBuffer<int> udimIndirection;
 
     /** Get the total number of materials.
-    */
-    uint getMaterialCount()
-    {
-        return materialCount;
-    }
+     */
+    uint getMaterialCount() { return materialCount; }
 
     /** Get the type of the given material.
-    */
-    MaterialType getMaterialType(const uint materialID)
-    {
-        return materialData[materialID].header.getMaterialType();
-    }
+     */
+    MaterialType getMaterialType(const uint materialID) { return materialData[materialID].header.getMaterialType(); }
 
     /** Get the material header for the given material.
-    */
-    MaterialHeader getMaterialHeader(const uint materialID)
-    {
-        return materialData[materialID].header;
-    }
+     */
+    MaterialHeader getMaterialHeader(const uint materialID) { return materialData[materialID].header; }
 
     /** Get the material data blob for the given material.
         The format of the data blob depends on the material type.
     */
-    MaterialDataBlob getMaterialDataBlob(const uint materialID)
-    {
-        return materialData[materialID];
-    }
+    MaterialDataBlob getMaterialDataBlob(const uint materialID) { return materialData[materialID]; }
 
     /** Returns true if the given material is a basic material.
         This function is currently used by legacy code that doesn't all material types, but may be removed in the future.
     */
-    bool isBasicMaterial(const uint materialID)
-    {
-        return materialData[materialID].header.isBasicMaterial();
-    }
+    bool isBasicMaterial(const uint materialID) { return materialData[materialID].header.isBasicMaterial(); }
 
     /** Get the material data for a basic material.
         Note that no type checking is done. The caller is responsible for ensuring that the given material is a basic material.
@@ -122,10 +107,7 @@ struct MaterialSystem
 #ifdef FALCOR_VULKAN
     [ForceInline]
 #endif
-    SamplerState getTextureSampler(const uint samplerID)
-    {
-        return materialSamplers[samplerID];
-    }
+    SamplerState getTextureSampler(const uint samplerID) { return materialSamplers[samplerID]; }
 
     /** Get the default texture sampler for a material.
         Note: the use of [ForceInline] causes Slang to inline this function in its output source.
@@ -142,16 +124,10 @@ struct MaterialSystem
     }
 
     /** Get a buffer by ID.
-    */
-    ByteAddressBuffer getBuffer(const uint bufferID)
-    {
-        return materialBuffers[bufferID];
-    }
+     */
+    ByteAddressBuffer getBuffer(const uint bufferID) { return materialBuffers[bufferID]; }
 
-    Texture3D<float4> getTexture3D(const uint textureID)
-    {
-        return materialTextures3D[textureID];
-    }
+    Texture3D<float4> getTexture3D(const uint textureID) { return materialTextures3D[textureID]; }
 
     /** Check if a material has displacement.
         \param[in] materialID Material ID
@@ -210,10 +186,7 @@ struct MaterialSystem
         \param[in] materialID Material ID
         \return Index of refraction.
     */
-    float evalIoR(const uint materialID)
-    {
-        return getMaterialHeader(materialID).getIoR();
-    }
+    float evalIoR(const uint materialID) { return getMaterialHeader(materialID).getIoR(); }
 
     /** Resolves TextureHandle from possibly-UDIM to standard TextureHandle
         \param[in] handle Texture handle with possibly UDIM flag
@@ -269,6 +242,8 @@ struct MaterialSystem
         TextureInfo info = {};
         switch (handle.getMode())
         {
+        case TextureHandle::Mode::PTex:
+            // fall-through
         case TextureHandle::Mode::Texture:
             materialTextures[handle.getTextureID()].GetDimensions(0, info.width, info.height, info.mipLevels);
             info.depth = 1;
@@ -299,7 +274,7 @@ struct MaterialSystem
         \param[in] lod Method for computing texture level-of-detail, must implement the `ITextureSampler` interface.
         \return Sampled color.
     */
-    float4 sampleTexture<L:ITextureSampler>(TextureHandle handle, SamplerState s, float2 uv, const float4 uniformValue, L lod)
+    float4 sampleTexture<L : ITextureSampler>(TextureHandle handle, SamplerState s, float2 uv, const float4 uniformValue, L lod)
     {
         handle = getResolvedTextureHandle(handle, uv);
         switch (handle.getMode())
@@ -308,13 +283,15 @@ struct MaterialSystem
             return uniformValue;
         case TextureHandle::Mode::Texture:
             return lod.sampleTexture(materialTextures[handle.getTextureID()], s, uv);
+        case TextureHandle::Mode::PTex:
+            return materialTextures[handle.getTextureID()][int2(uv)];
         default:
             return float4(0.f);
         }
     }
 
     /** Load displacement mapping data for the given material.
-    */
+     */
     void loadDisplacementData(const uint materialID, out DisplacementData displacementData)
     {
         // Note we can't zero initialize struct containing resources.
@@ -366,7 +343,8 @@ struct MaterialSystem
         // Load the material header first and early out if alpha test not supported.
         const MaterialHeader header = materialData[materialID].header;
 
-        if (header.getAlphaMode() != AlphaMode::Mask) return false;
+        if (header.getAlphaMode() != AlphaMode::Mask)
+            return false;
 
         SamplerState s = getTextureSampler(header.getDefaultTextureSamplerID());
         float uniformAlpha = isBasicMaterial(materialID) ? getBasicMaterialData(materialID).baseColor.a : 1.f;

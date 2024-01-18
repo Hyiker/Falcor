@@ -91,10 +91,11 @@ public:
 
         explicit CpuTextureHandle(const TextureHandle& gpuHandle)
         {
-            if (gpuHandle.getMode() == TextureHandle::Mode::Texture)
+            if (gpuHandle.getMode() == TextureHandle::Mode::Texture || gpuHandle.getMode() == TextureHandle::Mode::PTex)
             {
                 mID = gpuHandle.getTextureID();
                 mIsUdim = gpuHandle.getUdimEnabled();
+                mIsPTex = gpuHandle.getMode() == TextureHandle::Mode::PTex;
             }
         }
 
@@ -103,6 +104,9 @@ public:
 
         uint32_t getID() const { return mID; }
         bool isUdim() const { return mIsUdim; }
+
+        bool isPTex() const { return mIsPTex; }
+        void setIsPTex(bool isPTex) { mIsPTex = isPTex; }
 
         bool operator<(const CpuTextureHandle& other) const { return mID < other.mID; }
         bool operator==(const CpuTextureHandle& other) const { return mID == other.mID && mIsUdim == other.mIsUdim; }
@@ -113,7 +117,7 @@ public:
             if (isValid())
             {
                 gpuHandle.setTextureID(this->getID());
-                gpuHandle.setMode(TextureHandle::Mode::Texture);
+                gpuHandle.setMode(mIsPTex ? TextureHandle::Mode::PTex : TextureHandle::Mode::Texture);
                 gpuHandle.setUdimEnabled(this->isUdim());
             }
             else
@@ -127,6 +131,7 @@ public:
     private:
         uint32_t mID{kInvalidID};
         bool mIsUdim{false};
+        bool mIsPTex{false};
     };
 
     /// Struct describing a managed texture.

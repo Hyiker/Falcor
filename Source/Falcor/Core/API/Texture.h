@@ -326,6 +326,16 @@ public:
     uint64_t getTextureSizeInBytes() const;
 
     /**
+     * Returns if the texture is WD's PTex
+     */
+    bool isPTex() const { return mIsPTex; }
+
+    /**
+     * Set the texture to be WD's PTex
+     */
+    void setIsPTex(bool isPTex) { mIsPTex = isPTex; }
+
+    /**
      * Compares the texture description to another texture.
      * @return True if all fields (size/format/etc) are identical.
      */
@@ -348,6 +358,7 @@ protected:
     uint32_t mArraySize = 0;
     uint32_t mSampleCount = 0;
     bool mIsSparse = false;
+    bool mIsPTex = false;
     int3 mSparsePageRes = int3(0);
 
     friend class Device;
