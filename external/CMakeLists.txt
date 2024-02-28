@@ -188,6 +188,7 @@ set(BUILD_SHARED_LIBS ON)
 set(ASSIMP_NO_EXPORT ON)
 set(ASSIMP_BUILD_ASSIMP_VIEW OFF)
 set(ASSIMP_RUNTIME_OUTPUT_DIRECTORY ${FALCOR_RUNTIME_OUTPUT_DIRECTORY})
+set(ASSIMP_INJECT_DEBUG_POSTFIX OFF)
 
 add_subdirectory(assimp)
 
@@ -517,12 +518,16 @@ add_library(rtxdi INTERFACE)
 target_include_directories(rtxdi INTERFACE ${RTXDI_DIR}/rtxdi-sdk/include)
 
 # ptex
+message(STATUS "Configure ptex")
 set(PTEX_BUILD_DOCS OFF)
 set(PTEX_BUILD_STATIC_LIBS OFF)
 set(ZLIB_ROOT ${FALCOR_DEPS_DIR})
 add_subdirectory(ptex)
 set_target_properties(Ptex_dynamic PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY ${FALCOR_RUNTIME_OUTPUT_DIRECTORY})
+
 # force override the default include directory
-target_include_directories(Ptex_dynamic PUBLIC
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/ptex/src/ptex>)
+set(PTEX_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/ptex/src/ptex" PARENT_SCOPE)
+
+# target_include_directories(Ptex_dynamic PUBLIC
+# $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/ptex/src/ptex>)

@@ -60,6 +60,9 @@ namespace Falcor
             float3 position;
             float3 normal;
             float2 texCoord;
+            bool operator==(const Vertex& other) const {
+                return all(position == other.position) && all(normal == other.normal) && all(texCoord == other.texCoord);
+            }
         };
 
         using VertexList = std::vector<Vertex>;
@@ -126,6 +129,14 @@ namespace Falcor
             \return Returns the triangle mesh or nullptr if the mesh failed to load.
         */
         static ref<TriangleMesh> createFromFile(const std::filesystem::path& path, bool smoothNormals = false);
+
+
+        /** Creates a triangle mesh from a ply file.
+            Specially, we use rply to parse the ply file to enable face indices support.
+            \param[in] path File path to load mesh from (absolute or relative to working directory), extension must be `.ply`.
+            \return Returns the triangle mesh or nullptr if the mesh failed to load.
+        */
+        static ref<TriangleMesh> createFromPlyFile(const std::filesystem::path& path);
 
         /** Get the name of the triangle mesh.
             \return Returns the name.

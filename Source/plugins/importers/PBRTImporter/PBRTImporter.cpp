@@ -83,10 +83,11 @@
 #include "Scene/Material/PBRT/PBRTDielectricMaterial.h"
 #include "Scene/Material/PBRT/PBRTDiffuseTransmissionMaterial.h"
 #include "Scene/Curves/CurveTessellation.h"
+#include "Scene/PTexBuilder.h"
 #include <pybind11/pybind11.h>
 
+#include <execution>
 #include <unordered_map>
-#include <Ptexture.h>
 
 namespace Falcor
 {
@@ -156,6 +157,8 @@ struct SpectrumTexture
     SpectrumType spectrumType = SpectrumType::Albedo;
     std::variant<std::monostate, Spectrum, Falcor::ref<Texture>> texture;
     float4x4 transform = float4x4::identity();
+    std::vector<float16_t4> ptexData;
+    int ptexOffset = -1;
 
     bool isConstant() const { return std::holds_alternative<Spectrum>(texture); }
     Spectrum getConstant() const
@@ -211,12 +214,15 @@ struct BuilderContext
 {
     BasicScene& scene;
     SceneBuilder& builder;
+    PTexBuilder& ptexBuilder;
 
     std::map<std::string, FloatTexture> floatTextures;
     std::map<std::string, SpectrumTexture> spectrumTextures;
 
     std::map<std::string, Medium> media;
 
+    // !!! Be careful, namedMaterials may share the same name with materials,
+    // !!! like 'Unnamed0', but actually not the same pointer.
     std::map<std::string, Falcor::ref<Falcor::Material>> namedMaterials;
     std::vector<Falcor::ref<Falcor::Material>> materials;
 
@@ -229,6 +235,7 @@ struct BuilderContext
     size_t curveCount = 0;
 
     bool usePBRTMaterials = false;
+    bool disablePTex = false;
 
     Falcor::ref<Falcor::Material> getMaterial(const MaterialRef& materialRef)
     {
@@ -362,15 +369,21 @@ SpectrumTexture getSpectrumTexture(
 }
 
 void assignSpectrumTexture(
-    const SpectrumTexture& spectrumTexture,
+    SpectrumTexture& spectrumTexture,
     std::function<void(float3)> constantSetter,
-    std::function<void(Falcor::ref<Texture>)> textureSetter
+    std::function<void(Falcor::ref<Texture>)> textureSetter,
+    std::function<void(const PTexBuilder::PTexData&)> ptexSetter
 )
 {
     if (const auto* pSpectrum = std::get_if<Spectrum>(&spectrumTexture.texture))
         constantSetter(spectrumToRGB(*pSpectrum, spectrumTexture.spectrumType));
     else if (const auto* pTexture = std::get_if<Falcor::ref<Texture>>(&spectrumTexture.texture))
         textureSetter(*pTexture);
+    else if (!spectrumTexture.ptexData.empty())
+    {
+        ptexSetter(spectrumTexture.ptexData);
+        spectrumTexture.ptexData.clear();
+    }
 }
 
 std::optional<FloatTexture> getFloatTextureOrNull(BuilderContext& ctx, const ParameterDictionary& params, const std::string& name)
@@ -743,25 +756,6 @@ Light createLight(BuilderContext& ctx, const LightSceneEntity& entity)
     return light;
 }
 
-struct : public PtexErrorHandler
-{
-    void reportError(const char* error) override { logError("{}", error); }
-} errorHandler;
-
-static Ptex::PtexCache* getPtexCache()
-{
-    static Ptex::PtexCache* cache;
-    if (!cache)
-    {
-        int maxFiles = 100;
-        size_t maxMem = 1ull << 32; // 4GB
-        bool premultiply = true;
-
-        cache = Ptex::PtexCache::create(maxFiles, maxMem, premultiply, nullptr, &errorHandler);
-    }
-    return cache;
-}
-
 FloatTexture createFloatTexture(BuilderContext& ctx, const TextureSceneEntity& entity)
 {
     auto warnUnsupported = [&]() { warnUnsupportedType(entity.loc, "Float texture", entity.name); };
@@ -980,55 +974,8 @@ SpectrumTexture createSpectrumTexture(BuilderContext& ctx, const TextureSceneEnt
         const auto encodingString = params.getString("encoding", "sRGB");
         bool srgbEncoding = encodingString == "sRGB";
 
-        auto encodingFunc = [srgbEncoding](Float x) { return srgbEncoding ? std::pow(x, 2.2f) : x; };
-        Ptex::String error;
-        Ptex::PtexTexture* texture = getPtexCache()->get(filename.c_str(), error);
-        if (!texture)
-        {
-            logError("Error loading ptex file: {}", error.c_str());
-        }
-        else
-        {
-            int nFaces = texture->numFaces();
-            logDebug("{}: nFaces = {}", filename, nFaces);
-            const int nc = texture->numChannels();
-            texture->release();
-
-            Ptex::PtexFilter::Options opts(Ptex::PtexFilter::FilterType::f_bspline);
-            auto* filter = Ptex::PtexFilter::getFilter(texture, opts);
-
-            if (nc != 1 && nc != 3)
-            {
-                logError("Only 1 or 3 channel ptex files are supported");
-            }
-            else
-            {
-                // convert the original ptex storage to a falcor texture
-                // TODO: find a better way to work with the size limitation
-                const int width = 4096;
-                const int height = math::ceil(Float(nFaces) / width);
-                std::vector<float> data(width * height * 3);
-                for (int i = 0; i < nFaces; i++)
-                {
-                    constexpr Float filterWidth = 0.75f;
-
-                    int firstChan = 0;
-                    std::array<float, 3> result;
-                    filter->eval(result.data(), firstChan, nc, i, 0.5f, 0.5f, filterWidth, filterWidth, filterWidth, filterWidth);
-                    if (nc == 1)
-                    {
-                        result[2] = result[1] = result[0];
-                    }
-                    data[i * 3 + 0] = encodingFunc(result[0]) * scale;
-                    data[i * 3 + 1] = encodingFunc(result[1]) * scale;
-                    data[i * 3 + 2] = encodingFunc(result[2]) * scale;
-                }
-                auto pTex = ctx.builder.getDevice()->createTexture2D(width, height, ResourceFormat::RGB32Float, 1, 1, data.data());
-                pTex->setIsPTex(true);
-                spectrumTexture.texture = pTex;
-            }
-            filter->release();
-        }
+        if (!ctx.disablePTex)
+            spectrumTexture.ptexData = ctx.ptexBuilder.loadPTexData(filename, srgbEncoding, scale);
     }
     else
     {
@@ -1070,7 +1017,8 @@ Falcor::ref<Falcor::Material> createMaterial(BuilderContext& ctx, const Material
             assignSpectrumTexture(
                 reflectance,
                 [&](float3 rgb) { pPBRTMaterial->setBaseColor(float4(rgb, 1.f)); },
-                [&](Falcor::ref<Texture> pTexture) { pPBRTMaterial->setBaseColorTexture(pTexture); }
+                [&](Falcor::ref<Texture> pTexture) { pPBRTMaterial->setBaseColorTexture(pTexture); },
+                [&](PTexBuilder::PTexData ptexData) { ctx.ptexBuilder.addTextureData(pPBRTMaterial, ptexData); }
             );
             pPBRTMaterial->setDoubleSided(true);
             pMaterial = pPBRTMaterial;
@@ -1083,7 +1031,8 @@ Falcor::ref<Falcor::Material> createMaterial(BuilderContext& ctx, const Material
             assignSpectrumTexture(
                 reflectance,
                 [&](float3 rgb) { pStandardMaterial->setBaseColor(float4(rgb, 1.f)); },
-                [&](Falcor::ref<Texture> pTexture) { pStandardMaterial->setBaseColorTexture(pTexture); }
+                [&](Falcor::ref<Texture> pTexture) { pStandardMaterial->setBaseColorTexture(pTexture); },
+                [&](PTexBuilder::PTexData ptexData) { ctx.ptexBuilder.addTextureData(pStandardMaterial, ptexData); }
             );
             pStandardMaterial->setDoubleSided(true);
             pMaterial = pStandardMaterial;
@@ -1109,7 +1058,8 @@ Falcor::ref<Falcor::Material> createMaterial(BuilderContext& ctx, const Material
             assignSpectrumTexture(
                 reflectance,
                 [&](float3 rgb) { pPBRTMaterial->setBaseColor(float4(rgb, 1.f)); },
-                [&](Falcor::ref<Texture> pTexture) { pPBRTMaterial->setBaseColorTexture(pTexture); }
+                [&](Falcor::ref<Texture> pTexture) { pPBRTMaterial->setBaseColorTexture(pTexture); },
+                [&](PTexBuilder::PTexData ptexData) { ctx.ptexBuilder.addTextureData(pPBRTMaterial, ptexData); }
             );
             pPBRTMaterial->setDoubleSided(true);
             pMaterial = pPBRTMaterial;
@@ -1124,7 +1074,8 @@ Falcor::ref<Falcor::Material> createMaterial(BuilderContext& ctx, const Material
             assignSpectrumTexture(
                 reflectance,
                 [&](float3 rgb) { pStandardMaterial->setBaseColor(float4(rgb, 1.f)); },
-                [&](Falcor::ref<Texture> pTexture) { pStandardMaterial->setBaseColorTexture(pTexture); }
+                [&](Falcor::ref<Texture> pTexture) { pStandardMaterial->setBaseColorTexture(pTexture); },
+                [&](PTexBuilder::PTexData ptexData) { ctx.ptexBuilder.addTextureData(pStandardMaterial, ptexData); }
             );
             pStandardMaterial->setDoubleSided(true);
             pMaterial = pStandardMaterial;
@@ -1281,12 +1232,14 @@ Falcor::ref<Falcor::Material> createMaterial(BuilderContext& ctx, const Material
             assignSpectrumTexture(
                 reflectance,
                 [&](float3 rgb) { pPBRTMaterial->setBaseColor(float4(rgb, 1.f)); },
-                [&](Falcor::ref<Texture> pTexture) { pPBRTMaterial->setBaseColorTexture(pTexture); }
+                [&](Falcor::ref<Texture> pTexture) { pPBRTMaterial->setBaseColorTexture(pTexture); },
+                [&](PTexBuilder::PTexData ptexData) { ctx.ptexBuilder.addTextureData(pPBRTMaterial, ptexData); }
             );
             assignSpectrumTexture(
                 transmittance,
                 [&](float3 rgb) { pPBRTMaterial->setTransmissionColor(rgb); },
-                [&](Falcor::ref<Texture> pTexture) { pPBRTMaterial->setTransmissionTexture(pTexture); }
+                [&](Falcor::ref<Texture> pTexture) { pPBRTMaterial->setTransmissionTexture(pTexture); },
+                [&](PTexBuilder::PTexData ptexData) { logWarning(entity.loc, "PTex is not currently supported for 'transmittance'."); }
             );
             pMaterial = pPBRTMaterial;
         }
@@ -1299,12 +1252,14 @@ Falcor::ref<Falcor::Material> createMaterial(BuilderContext& ctx, const Material
             assignSpectrumTexture(
                 reflectance,
                 [&](float3 rgb) { pStandardMaterial->setBaseColor(float4(rgb, 1.f)); },
-                [&](Falcor::ref<Texture> pTexture) { pStandardMaterial->setBaseColorTexture(pTexture); }
+                [&](Falcor::ref<Texture> pTexture) { pStandardMaterial->setBaseColorTexture(pTexture); },
+                [&](PTexBuilder::PTexData ptexData) { ctx.ptexBuilder.addTextureData(pStandardMaterial, ptexData); }
             );
             assignSpectrumTexture(
                 transmittance,
                 [&](float3 rgb) { pStandardMaterial->setTransmissionColor(rgb); },
-                [&](Falcor::ref<Texture> pTexture) { pStandardMaterial->setTransmissionTexture(pTexture); }
+                [&](Falcor::ref<Texture> pTexture) { pStandardMaterial->setTransmissionTexture(pTexture); },
+                [&](PTexBuilder::PTexData ptexData) { logWarning(entity.loc, "PTex is not currently supported for 'transmittance'."); }
             );
             pStandardMaterial->setDoubleSided(true);
             pMaterial = pStandardMaterial;
@@ -1350,7 +1305,8 @@ Falcor::ref<Falcor::Material> createMaterial(BuilderContext& ctx, const Material
                 *sigma_a,
                 [&](float3 constant) { pHairMaterial->setBaseColor(float4(HairMaterial::colorFromSigmaA(constant, beta_n), 1.f)); },
                 [&](Falcor::ref<Texture> pTexture)
-                { logWarning(entity.loc, "Non-constant 'sigma_a' is currently not supported. Using default color instead."); }
+                { logWarning(entity.loc, "Non-constant 'sigma_a' is currently not supported. Using default color instead."); },
+                [&](PTexBuilder::PTexData ptexData) { logWarning(entity.loc, "PTex is not currently supported for 'sigma_a'."); }
             );
         }
         else if (reflectance)
@@ -1363,7 +1319,8 @@ Falcor::ref<Falcor::Material> createMaterial(BuilderContext& ctx, const Material
             assignSpectrumTexture(
                 *reflectance,
                 [&](float3 constant) { pHairMaterial->setBaseColor(float4(constant, 1.f)); },
-                [&](Falcor::ref<Texture> pTexture) { pHairMaterial->setBaseColorTexture(pTexture); }
+                [&](Falcor::ref<Texture> pTexture) { pHairMaterial->setBaseColorTexture(pTexture); },
+                [&](PTexBuilder::PTexData ptexData) { ctx.ptexBuilder.addTextureData(pHairMaterial, ptexData); }
             );
         }
         else if (eumelanin || pheomelanin)
@@ -1487,6 +1444,7 @@ Shape createShape(BuilderContext& ctx, const ShapeSceneEntity& entity)
 
     const auto& type = entity.name;
     const auto& params = entity.params;
+    bool usePtex = false;
 
     Shape shape;
 
@@ -1581,7 +1539,7 @@ Shape createShape(BuilderContext& ctx, const ShapeSceneEntity& entity)
     {
         // Parameters:
         // Int[] indices, Point3[] P, Point2[] uv, Vector3[] S, Normal3[] N, Int[] faceIndices
-        warnUnsupportedParameters(params, {"S", "faceIndices"});
+        warnUnsupportedParameters(params, {"S"});
 
         auto indices = params.getIntArray("indices");
         auto P = params.getPoint3Array("P");
@@ -1646,15 +1604,13 @@ Shape createShape(BuilderContext& ctx, const ShapeSceneEntity& entity)
                 std::back_inserter(uv),
                 [](int i)
                 {
-                    const int width = 4096;
-                    int x = i % width, y = i / width;
                     // int -> float conversion precision loss only occurs when |int| > 2^24.
                     // y is always < 2^24, we are safe here :)
-                    return float2(x, y);
+                    return float2(float(i), 0);
                 }
             );
+            usePtex = true;
         }
-
         Falcor::TriangleMesh::VertexList vertexList(P.size());
         for (size_t i = 0; i < P.size(); ++i)
         {
@@ -1680,7 +1636,15 @@ Shape createShape(BuilderContext& ctx, const ShapeSceneEntity& entity)
         auto filename = params.getString("filename", "");
         auto path = ctx.resolver(filename);
 
-        shape.pTriangleMesh = Falcor::TriangleMesh::createFromFile(path.string());
+        if (hasExtension(path, "ply"))
+        {
+            shape.pTriangleMesh = Falcor::TriangleMesh::createFromPlyFile(path.string());
+            usePtex = true;
+        }
+        else
+        {
+            shape.pTriangleMesh = Falcor::TriangleMesh::createFromFile(path.string());
+        }
         if (shape.pTriangleMesh)
             shape.pTriangleMesh->setName(filename);
         shape.transform = entity.transform;
@@ -1759,6 +1723,29 @@ Shape createShape(BuilderContext& ctx, const ShapeSceneEntity& entity)
         if (auto pStandardMaterial = dynamic_ref_cast<Falcor::StandardMaterial>(pMaterial))
         {
             pStandardMaterial->setBaseColor(float4(pStandardMaterial->getBaseColor3(), alpha));
+        }
+    }
+
+    if (shape.pMaterial && usePtex)
+    {
+        // apply ptex offset to texcoords
+        auto pTriangleMesh = shape.pTriangleMesh;
+        auto pMaterial = shape.pMaterial;
+        const int atlasWidth = ctx.ptexBuilder.getAtlasWidth();
+        if (auto ptexOffset = ctx.ptexBuilder.findFaceIndexOffset(pMaterial); ptexOffset >= 0)
+        {
+            auto vertexList = pTriangleMesh->getVertices();
+            std::for_each(
+                std::execution::par_unseq,
+                vertexList.begin(),
+                vertexList.end(),
+                [&](auto& vertex)
+                {
+                    int x = vertex.texCoord.x + ptexOffset;
+                    vertex.texCoord = float2(x % atlasWidth, x / atlasWidth);
+                }
+            );
+            pTriangleMesh->setVertices(vertexList);
         }
     }
 
@@ -1910,6 +1897,12 @@ void buildScene(BuilderContext& ctx)
     for (const auto& entity : ctx.scene.getMaterials())
         ctx.materials.push_back(createMaterial(ctx, entity));
 
+    // Create PTex atlas and assign texture to materials.
+    ctx.ptexBuilder.destroyPTexCache();
+    // Once all textures are loaded, and materials are created, we can build the PTex atlas.
+    ctx.ptexBuilder.buildPTexAtlas();
+    ctx.ptexBuilder.assignPTexToMaterials();
+
     // Create camera.
     auto camera = createCamera(ctx, ctx.scene.getCamera());
     if (camera.pCamera)
@@ -2023,11 +2016,13 @@ void PBRTImporter::importScene(
         TimeReport timeReport;
         pbrt::BasicScene pbrtScene(path.parent_path());
         pbrt::BasicSceneBuilder pbrtBuilder(pbrtScene);
+        PTexBuilder ptexBuilder(builder.getDevice());
         pbrt::parseFile(pbrtBuilder, path);
         timeReport.measure("Parsing pbrt scene");
 
-        pbrt::BuilderContext ctx{pbrtScene, builder};
+        pbrt::BuilderContext ctx{pbrtScene, builder, ptexBuilder};
         ctx.usePBRTMaterials = builder.getSettings().getOption("PBRTImporter:usePBRTMaterials", false);
+        ctx.disablePTex = builder.getSettings().getOption("disablePTex", false);
         pbrt::buildScene(ctx);
         timeReport.measure("Building pbrt scene");
         timeReport.printToLog();

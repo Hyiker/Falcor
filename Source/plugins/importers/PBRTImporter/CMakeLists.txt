@@ -21,7 +21,4 @@ target_copy_shaders(PBRTImporter plugins/importers/PBRTImporter)
 
 target_source_group(PBRTImporter "Plugins/Importers")
 
-target_link_libraries(PBRTImporter PRIVATE
-    Ptex_dynamic)
-
 validate_headers(PBRTImporter)

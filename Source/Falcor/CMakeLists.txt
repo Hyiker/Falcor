@@ -328,6 +328,8 @@ target_sources(Falcor PRIVATE
     Scene/Intersection.slang
     Scene/MeshIO.cs.slang
     Scene/NullTrace.cs.slang
+    Scene/PTexBuilder.cpp
+    Scene/PTexBuilder.h
     Scene/Raster.slang
     Scene/Raytracing.slang
     Scene/RaytracingInline.slang
@@ -802,6 +804,16 @@ target_sources(Falcor PRIVATE
     ../../external/imgui_addons/imguinodegrapheditor/imguinodegrapheditor.cpp
 )
 
+# rply source files
+target_sources(Falcor PRIVATE
+    ../../external/rply/rply.cpp
+    ../../external/rply/rply.h
+)
+
+target_include_directories(Falcor PRIVATE
+    ../../external/rply
+)
+
 target_copy_shaders(Falcor .)
 
 target_compile_features(Falcor
@@ -974,7 +986,7 @@ target_link_libraries(Falcor
     PRIVATE
         git_version
         FreeImage assimp OpenEXR OpenVDB lz4 zlib pugixml opensubdiv
-        glfw mikktspace nvtt
+        glfw mikktspace nvtt Ptex_dynamic
         $<$<BOOL:${FALCOR_HAS_D3D12}>:d3d12>
         $<$<BOOL:${FALCOR_HAS_D3D12_AGILITY_SDK}>:agility-sdk>
         $<$<BOOL:${FALCOR_HAS_AFTERMATH}>:aftermath>
@@ -992,6 +1004,8 @@ target_link_libraries(Falcor
 target_include_directories(Falcor
     PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}
+        # TODO: Find a proper way to workaround with this include issue
+        ${PTEX_INCLUDE_DIR}
 )
 
 set_target_properties(Falcor PROPERTIES

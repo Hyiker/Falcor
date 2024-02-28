@@ -222,6 +222,8 @@ namespace Falcor
 
         // Set default SDF grid config.
         setSDFGridConfig();
+        logInfo("Scene meshStaticData vertex count:   {}", sceneData.meshStaticData.size());
+        logInfo("Scene mCurveStaticData vertex count: {}", mCurveStaticData.size());
 
         // Create vertex array objects for meshes and curves.
         createMeshVao(sceneData.meshDrawCount, sceneData.meshIndexData, sceneData.meshStaticData, sceneData.meshSkinningData);
