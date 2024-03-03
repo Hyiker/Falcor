@@ -915,9 +915,12 @@ namespace Falcor
             mSceneBB |= pGridVolume->getBounds();
         }
 
-        // zfar = (camera.position - sceneBB.center).length() + sceneBB.radius()
-        float farZ = length(getCamera()->getPosition() - mSceneBB.center()) + mSceneBB.radius();
-        getCamera()->setFarPlane(farZ);
+        if(mSelectedCamera < mCameras.size())
+        {
+            auto cam = getCamera();
+            float farZ = length(cam->getPosition() - mSceneBB.center()) + mSceneBB.radius();
+            cam->setFarPlane(farZ);
+        }
     }
 
     void Scene::updateGeometryInstances(bool forceUpdate)
