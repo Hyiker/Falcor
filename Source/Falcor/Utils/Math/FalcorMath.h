@@ -206,4 +206,16 @@ inline float smoothstep(const float start, const float end, const float t)
     return smoothstep(s);
 }
 
+// Morton code encoding from Unreal Engine
+// https://github.com/EpicGames/UnrealEngine/blob/072300df18a94f18077ca20a14224b5d99fee872/Engine/Source/Runtime/Core/Public/GenericPlatform/GenericPlatformMath.h#L839
+inline uint32_t mortonCode(uint32_t x)
+{
+    x &= 0x000003ff;
+    x = (x ^ (x << 16)) & 0xff0000ff;
+    x = (x ^ (x << 8)) & 0x0300f00f;
+    x = (x ^ (x << 4)) & 0x030c30c3;
+    x = (x ^ (x << 2)) & 0x09249249;
+    return x;
+}
+
 } // namespace Falcor

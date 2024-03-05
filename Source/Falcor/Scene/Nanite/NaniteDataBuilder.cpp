@@ -3,20 +3,22 @@
 #include "Cluster.h"
 #include "TriangleUtils.h"
 #include "Utils/Algorithm/FastDisjointSet.h"
+#include "GraphPartitioner.h"
+#include "Scene/SceneBuilder.h"
 
 namespace Falcor
 {
 void NaniteDataBuilder::buildNaniteData(
     fstd::span<const PackedStaticVertexData> vertices,
     fstd::span<const uint32_t> triangleIndices,
-    fstd::span<const MeshDesc> meshDescs
+    fstd::span<const SceneBuilder::MeshSpec> meshList
 )
 {
     TimeReport report;
 
-    for (const auto& meshDesc : meshDescs)
+    for (const auto& meshSpec : meshList)
     {
-        clusterTriangles(vertices, triangleIndices, meshDesc);
+        clusterTriangles(vertices, triangleIndices, meshSpec);
     }
     report.measure("Cluster triangles");
 
@@ -35,12 +37,13 @@ void NaniteDataBuilder::buildNaniteData(
 void NaniteDataBuilder::clusterTriangles(
     fstd::span<const PackedStaticVertexData> vertices,
     fstd::span<const uint32_t> triangleIndices,
-    const MeshDesc& meshDesc
+    const SceneBuilder::MeshSpec& meshSpec
 )
 {
-    bool use16Bit = meshDesc.use16BitIndices();
-    uint32_t indexOffset = meshDesc.ibOffset * (use16Bit ? 2 : 1);
-    uint32_t indexCount = meshDesc.indexCount;
+    bool use16Bit = meshSpec.use16BitIndices;
+    uint32_t indexOffset = meshSpec.indexOffset * (use16Bit ? 2 : 1);
+    uint32_t indexCount = meshSpec.indexCount;
+    uint32_t triangleCount = indexCount / 3;
 
     std::vector<uint32_t> sharedEdges(indexCount);
     std::vector<bool> boundaryEdges(indexCount, false);
@@ -90,7 +93,7 @@ void NaniteDataBuilder::clusterTriangles(
     }
 
     // 3. construct disjoint set of triangles
-    DisjointSet disjointSet(indexCount / 3);
+    DisjointSet disjointSet(triangleCount);
     for (uint32_t edgeIndex = 0; edgeIndex < indexCount; edgeIndex++)
     {
         if (edgeAdjacency.direct[edgeIndex] == -2)
@@ -120,6 +123,46 @@ void NaniteDataBuilder::clusterTriangles(
                 }
             }
         );
+    }
+
+    // 4. Graph partition
+    GraphPartitioner partitioner(triangleCount);
+
+    {
+        auto getCenter = [&](uint32_t triangleIndex)
+        {
+            float3 center = getPosition(triangleIndex * 3);
+            center += getPosition(triangleIndex * 3 + 1);
+            center += getPosition(triangleIndex * 3 + 2);
+            return center / 3.f;
+        };
+
+        partitioner.buildLocalityLinks(disjointSet, {}, meshSpec.boundingBox, getCenter);
+
+        auto graph = partitioner.createGraph(indexCount);
+
+        for (uint32_t i = 0; i < triangleCount; i++)
+        {
+            // add edgeAdjacency to graph
+            graph->adjOffset[i] = graph->adj.size();
+
+            uint32_t triangleIndex = partitioner.getIndex(i);
+
+            for (int j = 0; j < 3; j++)
+            {
+                edgeAdjacency.forEachAdjacentEdges(
+                    triangleIndex * 3 + j, [&](uint32_t edgeIndex, int adjIndex) { graph->addAdjacency(adjIndex / 3, 4 * 65); }
+                );
+            }
+            graph->addLocalityLink(triangleIndex, 1);
+        }
+
+        graph->adjOffset[triangleCount] = graph->adj.size();
+
+        constexpr int kClusterSize = 128;
+        partitioner.partition(*graph, kClusterSize - 4, kClusterSize);
+        FALCOR_CHECK(partitioner.getClustersCount() > 0, "No clusters found");
+        logInfo("Partitioner partition result: {} clusters", partitioner.getClustersCount());
     }
 }
 

@@ -34,7 +34,6 @@
 #include "VertexAttrib.slangh"
 #include "SceneTypes.slang"
 #include "Material/MaterialTextureLoader.h"
-#include "Nanite/NaniteDataBuilder.h"
 
 #include "Core/Macros.h"
 #include "Core/AssetResolver.h"
@@ -53,6 +52,7 @@
 
 namespace Falcor
 {
+class NaniteDataBuilder;
 class FALCOR_API SceneBuilder
 {
 public:
@@ -862,6 +862,7 @@ private:
 
     friend class SceneCache;
     friend class SceneBuilderDump;
+    friend class NaniteDataBuilder;
 };
 
 FALCOR_ENUM_CLASS_OPERATORS(SceneBuilder::Flags);

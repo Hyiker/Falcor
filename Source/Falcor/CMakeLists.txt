@@ -594,6 +594,7 @@ target_sources(Falcor PRIVATE
     Utils/Algorithm/PrefixSum.cpp
     Utils/Algorithm/PrefixSum.cs.slang
     Utils/Algorithm/PrefixSum.h
+    Utils/Algorithm/RadixSort.h
     Utils/Algorithm/UnionFind.h
 
     Utils/Color/ColorHelpers.slang
@@ -1010,7 +1011,7 @@ target_link_libraries(Falcor
     PRIVATE
     git_version
     FreeImage assimp OpenEXR OpenVDB lz4 zlib pugixml opensubdiv
-    glfw mikktspace nvtt Ptex_dynamic
+    glfw mikktspace nvtt Ptex_dynamic metis
     $<$<BOOL:${FALCOR_HAS_D3D12}>:d3d12>
     $<$<BOOL:${FALCOR_HAS_D3D12_AGILITY_SDK}>:agility-sdk>
     $<$<BOOL:${FALCOR_HAS_AFTERMATH}>:aftermath>

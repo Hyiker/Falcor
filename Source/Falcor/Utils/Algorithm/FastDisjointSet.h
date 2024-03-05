@@ -46,6 +46,14 @@ public:
      */
     uint32_t find(uint32_t i);
 
+    /**
+     * @brief Direct parent access.
+     *
+     * @param i
+     * @return uint32_t
+     */
+    uint32_t operator[](uint32_t i) const { return mParents[i]; }
+
 private:
     std::vector<uint32_t> mParents;
 };

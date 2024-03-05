@@ -30,6 +30,7 @@
 #include "Importer.h"
 #include "Curves/CurveConfig.h"
 #include "Material/StandardMaterial.h"
+#include "Nanite/NaniteDataBuilder.h"
 #include "Utils/Logger.h"
 #include "Utils/Math/Common.h"
 #include "Utils/Image/TextureAnalyzer.h"
@@ -3060,7 +3061,7 @@ void SceneBuilder::createNaniteData()
     }
     logInfo("Building Nanite data for {} meshes.", mSceneData.meshDesc.size());
 
-    mpNaniteDataBuilder->buildNaniteData(mSceneData.meshStaticData, mSceneData.meshIndexData, mSceneData.meshDesc);
+    mpNaniteDataBuilder->buildNaniteData(mSceneData.meshStaticData, mSceneData.meshIndexData, mMeshes);
 }
 
 FALCOR_SCRIPT_BINDING(SceneBuilder)
