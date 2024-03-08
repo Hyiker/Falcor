@@ -1,6 +1,8 @@
 #include "TriangleUtils.h"
 namespace Falcor
 {
+EdgeHash::EdgeHash(int size) : mEdgeHashmap(std::floor(std::log2(size))) {}
+
 void EdgeHash::addEdge(uint32_t edgeIndex, std::function<float3(uint32_t)> getPosition)
 {
     float3 pos0 = getPosition(edgeIndex);

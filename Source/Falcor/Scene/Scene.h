@@ -338,6 +338,7 @@ namespace Falcor
             std::vector<uint32_t> meshIndexData;                    ///< Vertex indices for all meshes in either 32-bit or 16-bit format packed tightly, decided per mesh.
             std::vector<PackedStaticVertexData> meshStaticData;     ///< Vertex attributes for all meshes in packed format.
             std::vector<SkinningVertexData> meshSkinningData;       ///< Additional vertex attributes for skinned meshes.
+            std::vector<uint64_t> meshClusterGUIDData;              ///< Debugging data for Nanite cluster GUID(per triangle)
 
             // Curve data
             std::vector<CurveDesc> curveDesc;                       ///< List of curve descriptors.
@@ -1152,6 +1153,10 @@ namespace Falcor
         */
         void uploadGeometry();
 
+        /** Uploads nanite cluster GUID data.
+         */
+        void uploadNaniteData();
+
         /** Update the scene's global bounding box.
         */
         void updateBounds();
@@ -1242,6 +1247,7 @@ namespace Falcor
         void bindSDFGrids();
         void bindLights();
         void bindSelectedCamera();
+        void bindNaniteData();
         void bindParameterBlock();
 
         Scene(ref<Device> pDevice, SceneData&& sceneData);
@@ -1277,6 +1283,7 @@ namespace Falcor
         std::vector<MeshGroup> mMeshGroups;                         ///< Groups of meshes. Each group maps to a BLAS for ray tracing.
         std::vector<std::string> mMeshNames;                        ///< Mesh names, indxed by mesh ID
         std::vector<Node> mSceneGraph;                              ///< For each index i, the array element indicates the parent node. Indices are in relation to mLocalToWorldMatrices.
+        std::vector<uint64_t> mClusterGUIDs;                        ///< Nanite cluster GUIDs for each triangle.
 
         /// For Python bindings of triangle meshes.
         ref<ComputePass> mpLoadMeshPass;
@@ -1355,6 +1362,7 @@ namespace Falcor
         ref<Buffer> mpCustomPrimitivesBuffer;
         ref<Buffer> mpLightsBuffer;
         ref<Buffer> mpGridVolumesBuffer;
+        ref<Buffer> mpClusterGUIDsBuffer;
         ref<ParameterBlock> mpSceneBlock;
 
         // Camera

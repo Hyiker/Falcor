@@ -1,5 +1,6 @@
 #pragma once
 #include <cinttypes>
+#include <tbb/concurrent_unordered_map.h>
 
 #include "HashUtils.h"
 #include "Core/Macros.h"
@@ -54,6 +55,8 @@ class EdgeHash
 public:
     EdgeHash() = default;
 
+    EdgeHash(int size);
+
     /**
      * @brief add an edge to the hashmap.
      *
@@ -76,7 +79,7 @@ public:
     );
 
 private:
-    std::unordered_multimap<uint32_t, uint32_t> mEdgeHashmap;
+    tbb::concurrent_unordered_multimap<uint32_t, uint32_t> mEdgeHashmap;
 };
 
 struct EdgeAdjacency

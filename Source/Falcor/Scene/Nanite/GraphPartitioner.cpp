@@ -179,5 +179,84 @@ void GraphPartitioner::buildLocalityLinks(
         }
     }
 }
-void GraphPartitioner::partition(GraphData& graph, uint32_t minPartitionSize, uint32_t maxPartitionSize) const {}
+void GraphPartitioner::partition(GraphData& graph, uint32_t minPartitionSize, uint32_t maxPartitionSize)
+{
+    const int kTargetPartitionSize = (minPartitionSize + maxPartitionSize) / 2;
+    const int kTargetNumPartitions = div_round_up(graph.num, kTargetPartitionSize);
+
+    if (kTargetNumPartitions > 1)
+    {
+        mPartitionIDs.resize(mNumElements);
+
+        idx_t numConstraints = 1;
+        idx_t numParts = kTargetNumPartitions;
+        idx_t edgesCut = 0;
+
+        idx_t options[METIS_NOPTIONS];
+        METIS_SetDefaultOptions(options);
+
+        options[METIS_OPTION_UFACTOR] = 200; //( 1000 * MaxPartitionSize * TargetNumPartitions ) / NumElements - 1000;
+        // options[ METIS_OPTION_NCUTS ] = 8;
+        // options[ METIS_OPTION_IPTYPE ] = METIS_IPTYPE_RANDOM;
+        // options[ METIS_OPTION_SEED ] = 17;
+
+        // int r = METIS_PartGraphRecursive(
+        int r = METIS_PartGraphKway(
+            &graph.num,
+            &numConstraints, // number of balancing constraints
+            graph.adjOffset.data(),
+            graph.adj.data(),
+            nullptr,              // Vert weights
+            nullptr,              // Vert sizes for computing the total communication volume
+            graph.adjCost.data(), // Edge weights
+            &numParts,
+            nullptr, // Target partition weight
+            nullptr, // Allowed load imbalance tolerance
+            options,
+            &edgesCut,
+            mPartitionIDs.data()
+        );
+        FALCOR_CHECK(r == METIS_OK, "METIS partitioning failed, error code: {}", r);
+        std::vector<uint32_t> elementCount(kTargetNumPartitions, 0);
+
+        for (auto partitionID : mPartitionIDs)
+        {
+            elementCount[partitionID]++;
+        }
+
+        uint32_t begin = 0;
+        mRanges.resize(kTargetNumPartitions);
+        for (int partitionIndex = 0; partitionIndex < kTargetNumPartitions; partitionIndex++)
+        {
+            mRanges[partitionIndex] = std::make_pair(begin, begin + elementCount[partitionIndex]);
+            begin += elementCount[partitionIndex];
+            elementCount[partitionIndex] = 0;
+        }
+
+        std::vector<uint32_t> oldIndices(mNumElements);
+        std::swap(mIndices, oldIndices);
+
+        // reorder indices
+        for (uint32_t i = 0; i < mNumElements; i++)
+        {
+            uint32_t partitionIndex = mPartitionIDs[i];
+            uint32_t offset = mRanges[partitionIndex].first;
+            uint32_t num = elementCount[partitionIndex]++;
+
+            mIndices[offset + num] = oldIndices[i];
+        }
+
+        mPartitionIDs.clear();
+    }
+    else
+    {
+        // Single
+        mRanges.emplace_back(0, mNumElements);
+    }
+
+    for (uint32_t i = 0; i < mNumElements; i++)
+    {
+        mSortedIndices[mIndices[i]] = i;
+    }
+}
 } // namespace Falcor

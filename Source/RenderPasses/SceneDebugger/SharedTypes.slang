@@ -41,6 +41,7 @@ enum class SceneDebuggerMode : uint32_t
     BlasID,
     InstancedGeometry,
     PrimitiveID,
+    ClusterID,
     // Shading data
     FaceNormal,
     ShadingNormal,
@@ -65,6 +66,7 @@ FALCOR_ENUM_INFO(
         { SceneDebuggerMode::BlasID, "BlasID" },
         { SceneDebuggerMode::InstancedGeometry, "InstancedGeometry" },
         { SceneDebuggerMode::PrimitiveID, "PrimitiveID" },
+        { SceneDebuggerMode::ClusterID, "ClusterID" },
         // Shading data
         { SceneDebuggerMode::FaceNormal, "FaceNormal" },
         { SceneDebuggerMode::ShadingNormal, "ShadingNormal" },
@@ -110,7 +112,7 @@ FALCOR_ENUM_REGISTER(SceneDebuggerBSDFProperty);
 
 struct SceneDebuggerParams
 {
-    uint mode = (uint)SceneDebuggerMode::FaceNormal; ///< Current visualization mode. See SceneDebuggerMode.
+    uint mode = (uint)SceneDebuggerMode::ClusterID; ///< Current visualization mode. See SceneDebuggerMode.
     uint2 frameDim = { 0, 0 };
     uint frameCount = 0;
 
@@ -136,6 +138,7 @@ struct PixelData
     uint materialID;
     uint geometryID;
     uint blasID;
+    uint64_t clusterID;
 
     // ShadingData
     float3 posW;

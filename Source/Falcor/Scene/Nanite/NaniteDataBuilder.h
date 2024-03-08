@@ -2,7 +2,9 @@
 
 #include <fstd/span.h>
 #include "Core/Macros.h"
+#include "Cluster.h"
 #include "Scene/SceneBuilder.h"
+
 namespace Falcor
 {
 class FALCOR_API NaniteDataBuilder
@@ -20,6 +22,8 @@ public:
         fstd::span<const SceneBuilder::MeshSpec> meshList
     );
 
+    auto getClusterGUIDs() const { return mClusterGUIDs; }
+
 private:
     /**
      * @brief Cluster the triangles in a mesh.
@@ -27,8 +31,9 @@ private:
      * @param vertices The global vertices buffer.
      * @param triangleIndices The global triangle indices buffer.
      * @param meshList The mesh list.
+     * @return The clustering result of the mesh.
      */
-    void clusterTriangles(
+    std::vector<Cluster> clusterTriangles(
         fstd::span<const PackedStaticVertexData> vertices,
         fstd::span<const uint32_t> triangleIndices,
         const SceneBuilder::MeshSpec& meshSpec
@@ -51,5 +56,8 @@ private:
      *
      */
     void encodeNaniteMeshes();
+
+    std::vector<Cluster> mClusters;
+    std::vector<uint64_t> mClusterGUIDs;
 };
 } // namespace Falcor

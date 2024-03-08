@@ -3062,6 +3062,8 @@ void SceneBuilder::createNaniteData()
     logInfo("Building Nanite data for {} meshes.", mSceneData.meshDesc.size());
 
     mpNaniteDataBuilder->buildNaniteData(mSceneData.meshStaticData, mSceneData.meshIndexData, mMeshes);
+
+    mSceneData.meshClusterGUIDData = mpNaniteDataBuilder->getClusterGUIDs();
 }
 
 FALCOR_SCRIPT_BINDING(SceneBuilder)

@@ -119,6 +119,7 @@ struct SceneDebugger
         uint primitiveID = PixelData::kInvalidID;
         uint geometryID = PixelData::kInvalidID;
         uint blasID = PixelData::kInvalidID;
+        uint64_t clusterID = PixelData::kInvalidID;
 
         VertexData v = {};
 
@@ -132,6 +133,7 @@ struct SceneDebugger
             primitiveID = triangleHit.primitiveIndex;
             blasID = meshToBlasID[geometryID];
             materialID = gScene.getMaterialID(triangleHit.instanceID);
+            clusterID = gScene.getClusterGUID(triangleHit.instanceID, primitiveID);
 
             // Load vertex attributes.
             v = gScene.getVertexData(triangleHit);
@@ -192,6 +194,7 @@ struct SceneDebugger
             d.materialID = materialID;
             d.geometryID = geometryID;
             d.blasID = blasID;
+            d.clusterID = clusterID;
 
             // ShadingData
             d.posW = sd.posW;
@@ -248,6 +251,8 @@ struct SceneDebugger
                 return float3(v, v, v);
             }
         }
+        case SceneDebuggerMode::ClusterID:
+            return pseudocolor(uint(clusterID >> 32) ^ uint(clusterID & 0xffffffff));
         // Shading data
         case SceneDebuggerMode::FaceNormal:
             return remapVector(sd.faceN);

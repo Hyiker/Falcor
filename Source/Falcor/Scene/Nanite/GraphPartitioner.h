@@ -1,6 +1,7 @@
 #pragma once
 #include "Utils/Algorithm/FastDisjointSet.h"
 #include <fstd/span.h>
+#include "metis.h"
 namespace Falcor
 {
 /**
@@ -10,14 +11,17 @@ namespace Falcor
 class GraphPartitioner
 {
 public:
+    /**
+     * @brief GraphData prepared for METIS partitioning.
+     */
     struct GraphData
     {
         int offset;
         int num;
 
-        std::vector<uint32_t> adj;       // adjacency edge index
-        std::vector<uint32_t> adjCost;   // edge cost
-        std::vector<uint32_t> adjOffset; // edge offset
+        std::vector<idx_t> adj;       // adjacency edge index
+        std::vector<idx_t> adjCost;   // edge cost
+        std::vector<idx_t> adjOffset; // edge offset
 
         GraphData(GraphPartitioner& partitioner, uint32_t numAdjacency, uint32_t numElements) : mPartitioner(partitioner)
         {
@@ -35,7 +39,7 @@ public:
          * @param adjIndex Indexing the sorted indices.
          * @param cost The corresponding cost.
          */
-        void addAdjacency(uint32_t adjIndex, uint32_t cost)
+        void addAdjacency(uint32_t adjIndex, idx_t cost)
         {
             adj.push_back(mPartitioner.mSortedIndices[adjIndex]);
             adjCost.push_back(cost);
@@ -46,7 +50,7 @@ public:
          * @param index The index refers to a collection of locality links.
          * @param cost The corresponding cost.
          */
-        void addLocalityLink(uint32_t index, uint32_t cost)
+        void addLocalityLink(uint32_t index, idx_t cost)
         {
             auto range = mPartitioner.mLocalityLinks.equal_range(index);
             for (auto it = range.first; it != range.second; it++)
@@ -58,6 +62,7 @@ public:
     private:
         GraphPartitioner& mPartitioner;
     };
+    /* Range with left inclusive, right exclusive */
     using Range = std::pair<uint32_t, uint32_t>;
 
     /**
@@ -98,28 +103,53 @@ public:
      * @param minPartitionSize The minimum partition(cluster) size.
      * @param maxPartitionSize The maximum partition(cluster) size.
      */
-    void partition(GraphData& graph, uint32_t minPartitionSize, uint32_t maxPartitionSize) const;
+    void partition(GraphData& graph, uint32_t minPartitionSize, uint32_t maxPartitionSize);
 
     /**
      * @brief Get sorted triangle index.
      *
-     * @param i The index of the sorted indices.
+     * @param i The index of the indices.
      * @return The triangle index.
      */
     auto getIndex(uint32_t i) const { return mIndices[i]; }
 
     /**
-     * @brief Get the number of clusters.
+     * @brief Get the Sorted index.
      *
-     * @return The number of clusters.
+     * @param i The index of the sorted indices.
+     * @return The sorted index.
      */
-    auto getClustersCount() const { return mRanges.size(); }
+    auto getSortedIndex(uint32_t i) const { return mSortedIndices[i]; }
+
+    /**
+     * @brief Get the number of ranges(namely, clusters).
+     *
+     * @return The number of ranges.
+     */
+    auto getRangesCount() const { return mRanges.size(); }
+
+    /**
+     * @brief Get the Range by index.
+     *
+     * @param i The index of the range.
+     * @return The partition cluster range.
+     */
+    auto getRange(uint32_t i) const { return mRanges[i]; }
+
+    /**
+     * @brief Get the Ranges object.
+     *
+     * @return Partition result ranges.
+     */
+    const auto& getRanges() const { return mRanges; }
 
 private:
     std::vector<Range> mRanges;                       // Partition result ranges
     std::vector<uint32_t> mIndices;                   // The key of sorted indices
     std::vector<uint32_t> mSortedIndices;             // The sorted indices
     std::multimap<uint32_t, uint32_t> mLocalityLinks; // Locally nearby nodes link
+
+    std::vector<idx_t> mPartitionIDs; // The output partition ID for each triangle
 
     uint32_t mNumElements;
     friend struct GraphData;

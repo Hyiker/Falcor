@@ -1,3 +1,5 @@
+#include <tbb/parallel_for.h>
+
 #include "NaniteDataBuilder.h"
 #include "Utils/Timing/TimeReport.h"
 #include "Cluster.h"
@@ -14,11 +16,21 @@ void NaniteDataBuilder::buildNaniteData(
     fstd::span<const SceneBuilder::MeshSpec> meshList
 )
 {
+    // manually calculate the triangle count due to the existence of 16bit indices
+    uint32_t triangleCount = std::accumulate(
+        meshList.begin(), meshList.end(), 0, [](uint32_t sum, const SceneBuilder::MeshSpec& meshSpec) { return sum + meshSpec.indexCount; }
+    );
+    triangleCount /= 3;
+    mClusterGUIDs.resize(triangleCount);
     TimeReport report;
 
     for (const auto& meshSpec : meshList)
     {
-        clusterTriangles(vertices, triangleIndices, meshSpec);
+        if (meshSpec.isStatic)
+        {
+            auto clusters = clusterTriangles(vertices, triangleIndices, meshSpec);
+            mClusters.insert(mClusters.end(), std::move_iterator(clusters.begin()), std::move_iterator(clusters.end()));
+        }
     }
     report.measure("Cluster triangles");
 
@@ -34,22 +46,25 @@ void NaniteDataBuilder::buildNaniteData(
     report.printToLog();
 }
 
-void NaniteDataBuilder::clusterTriangles(
+std::vector<Cluster> NaniteDataBuilder::clusterTriangles(
     fstd::span<const PackedStaticVertexData> vertices,
     fstd::span<const uint32_t> triangleIndices,
     const SceneBuilder::MeshSpec& meshSpec
 )
 {
+    FALCOR_CHECK(meshSpec.isStatic, "Nanite only supports static meshes for now.");
+    constexpr int kClusterSize = 128;
     bool use16Bit = meshSpec.use16BitIndices;
     uint32_t indexOffset = meshSpec.indexOffset * (use16Bit ? 2 : 1);
     uint32_t indexCount = meshSpec.indexCount;
+    uint32_t vertexOffset = meshSpec.staticVertexOffset;
     uint32_t triangleCount = indexCount / 3;
 
     std::vector<uint32_t> sharedEdges(indexCount);
     std::vector<bool> boundaryEdges(indexCount, false);
 
     // adjoint vertex hash -> edge index
-    EdgeHash edgeHash;
+    EdgeHash edgeHash(indexCount);
     EdgeAdjacency edgeAdjacency(indexCount);
 
     auto convertIndex = [&](uint32_t index) -> uint32_t
@@ -58,39 +73,38 @@ void NaniteDataBuilder::clusterTriangles(
                         : triangleIndices[indexOffset + index];
     };
 
-    auto getPosition = [&](uint32_t index) -> float3 { return vertices[convertIndex(index)].position; };
+    auto getPosition = [&](uint32_t index) -> float3 { return vertices[convertIndex(index) + vertexOffset].position; };
 
     // 1. construct edge hash map
-    // TODO: parallelize this
-    for (uint32_t edgeIndex = 0; edgeIndex < indexCount; edgeIndex++)
-    {
-        edgeHash.addEdge(edgeIndex, getPosition);
-    }
+    tbb::parallel_for(0u, indexCount, [&](uint32_t edgeIndex) { edgeHash.addEdge(edgeIndex, getPosition); });
 
     // 2. find adjacent edges, build adjacency list
-    // TODO: parallelize this
-    for (uint32_t edgeIndex = 0; edgeIndex < indexCount; edgeIndex++)
-    {
-        edgeHash.forEachEdgeWithOppositeDirection(
-            edgeIndex,
-            getPosition,
-            [&](uint32_t edgeIndex, uint32_t otherEdgeIndex)
-            {
-                int adjIndex = -1;
-                int adjCount = 0;
-
-                adjCount++;
-                adjIndex = otherEdgeIndex;
-
-                // the edge is shared by more than 2 triangles
-                if (adjCount > 1)
+    tbb::parallel_for(
+        0u,
+        indexCount,
+        [&](uint32_t edgeIndex)
+        {
+            edgeHash.forEachEdgeWithOppositeDirection(
+                edgeIndex,
+                getPosition,
+                [&](uint32_t edgeIndex, uint32_t otherEdgeIndex)
                 {
-                    adjIndex = -2;
+                    int adjIndex = -1;
+                    int adjCount = 0;
+
+                    adjCount++;
+                    adjIndex = otherEdgeIndex;
+
+                    // the edge is shared by more than 2 triangles
+                    if (adjCount > 1)
+                    {
+                        adjIndex = -2;
+                    }
+                    edgeAdjacency.direct[edgeIndex] = adjIndex;
                 }
-                edgeAdjacency.direct[edgeIndex] = adjIndex;
-            }
-        );
-    }
+            );
+        }
+    );
 
     // 3. construct disjoint set of triangles
     DisjointSet disjointSet(triangleCount);
@@ -159,11 +173,26 @@ void NaniteDataBuilder::clusterTriangles(
 
         graph->adjOffset[triangleCount] = graph->adj.size();
 
-        constexpr int kClusterSize = 128;
         partitioner.partition(*graph, kClusterSize - 4, kClusterSize);
-        FALCOR_CHECK(partitioner.getClustersCount() > 0, "No clusters found");
-        logInfo("Partitioner partition result: {} clusters", partitioner.getClustersCount());
+        FALCOR_CHECK(partitioner.getRangesCount() > 0, "No clusters found");
     }
+
+    // 5. Create clusters
+    std::vector<Cluster> clusters(partitioner.getRangesCount());
+    const uint32_t kOptimalClusterCount = div_round_up(indexCount, uint32_t(kClusterSize));
+
+    // TODO: parallelize this
+    const auto& ranges = partitioner.getRanges();
+    // index straight to uint32 index array
+    const uint32_t triangleBase = meshSpec.indexOffset / 3;
+    auto clusterCreationCallback = [&](uint32_t triangleOffset, uint64_t clusterGUID)
+    { mClusterGUIDs[triangleBase + triangleOffset] = clusterGUID; };
+    tbb::parallel_for(
+        0u,
+        uint32_t(partitioner.getRangesCount()),
+        [&](uint32_t i) { clusters[i] = Cluster(vertices, convertIndex, partitioner, edgeAdjacency, ranges[i], clusterCreationCallback); }
+    );
+    return clusters;
 }
 
 void NaniteDataBuilder::buildDAG()

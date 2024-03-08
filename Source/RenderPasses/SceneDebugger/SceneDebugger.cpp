@@ -55,6 +55,8 @@ std::string getModeDesc(SceneDebuggerMode mode)
     case SceneDebuggerMode::InstancedGeometry:
         return "Green = instanced geometry\n"
                "Red = non-instanced geometry";
+    case SceneDebuggerMode::ClusterID:
+        return "Cluster ID in pseudocolor";
     // Shading data
     case SceneDebuggerMode::FaceNormal:
         return "Face normal in RGB color";
@@ -294,6 +296,7 @@ void SceneDebugger::renderPixelDataUI(Gui::Widgets& widget)
             text += fmt::format("Instance ID: {}\n", data.instanceID);
             text += fmt::format("Material ID: {}\n", data.materialID);
             text += fmt::format("BLAS ID: {}\n", data.blasID);
+            text += fmt::format("Cluster GUID: {}\n", data.clusterID);
             widget.text(text);
             widget.dummy("#spacer2", {1, 10});
         }

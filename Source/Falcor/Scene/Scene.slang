@@ -80,7 +80,8 @@ struct Scene
     StructuredBuffer<PrevVertexData> prevVertices;                  ///< Vertex data for the previous frame, for dynamic meshes only.
 #if SCENE_HAS_INDEXED_VERTICES
     [root] ByteAddressBuffer indexData;                             ///< Vertex indices, three indices per triangle packed tightly. The format is specified per mesh.
-#endif
+    #endif
+    [root] StructuredBuffer<uint64_t> clusterGUIDs;                 ///< Triangle GUIDs for clustering.
 
     // Curves
     StructuredBuffer<CurveDesc> curves;
@@ -342,6 +343,29 @@ struct Scene
     StaticVertexData getVertex(const uint index)
     {
         return vertices[index].unpack();
+    }
+
+    /** Returns cluster index data by vertex index.
+        \param[in] index Global triangle index.
+        \return Cluster GUID.
+    */
+    uint64_t getClusterGUID(const uint index){
+        return clusterGUIDs[index];
+    }
+
+    /** Returns cluster index data for a given triangle.
+        \param[in] instanceID Geometry instance ID of the mesh.
+        \param[in] triangleIndex Index of the triangle in the given mesh.
+        \return Cluster GUID.
+    */
+    uint64_t getClusterGUID(const GeometryInstanceID instanceID, const uint triangleIndex) {
+#if SCENE_HAS_INDEXED_VERTICES
+        const GeometryInstanceData instance = getGeometryInstance(instanceID);
+        uint triIndex = instance.ibOffset / 3 + triangleIndex;
+#else // !SCENE_HAS_INDEXED_VERTICES
+        uint triIndex = triangleIndex;
+#endif
+        return clusterGUIDs[triIndex];
     }
 
     /** Returns a triangle's face normal in object space.
