@@ -533,10 +533,8 @@ set(PTEX_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/ptex/src/ptex" PARENT_SCOPE)
 # $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/ptex/src/ptex>)
 
 # METIS
-message(STATUS "Configure METIS")
-# GKlib, required by METIS
-add_subdirectory(GKlib)
+message(STATUS "Configure libmetis")
 
 set(METIS_INSTALL OFF)
 set(METIS_LIBRARY_TYPE STATIC)
-add_subdirectory(METIS)
+add_subdirectory(metis)

@@ -40,10 +40,22 @@ private:
     );
 
     /**
-     * @brief Build DAG data for mesh simplification.
+     * @brief Reduce the children collection to form a DAG parent.
+     * Store data into the pre-allocated(for parallelism) mClusters and mClusterGroups.
      *
+     * @param clusterCount Counter variable for real cluster count.
+     * @param children The index collection of DAG children.
+     * @param groupIndex The index of the parent group for storing the ClusterGroup.
      */
-    void buildDAG();
+    void reduceDAG(std::atomic_uint32_t& clusterCount, fstd::span<const uint32_t> children, uint32_t groupIndex);
+
+    /**
+     * @brief Build DAG data for mesh simplification.
+     * Resulting DAG data will be stored in mClusterGroups.
+     * @param clusterRangeStart The start index of the clusters.
+     * @param clusterRangeCount The count of the clusters.
+     */
+    void buildDAG(uint32_t clusterRangeStart, uint32_t clusterRangeCount);
 
     /**
      * @brief Build the coarse representation of original high precision meshes.
@@ -57,7 +69,8 @@ private:
      */
     void encodeNaniteMeshes();
 
-    std::vector<Cluster> mClusters;
-    std::vector<uint64_t> mClusterGUIDs;
+    std::vector<Cluster> mClusters;           ///< Original clusters data.
+    std::vector<ClusterGroup> mClusterGroups; ///< Flattened hierarchical cluster groups.
+    std::vector<uint64_t> mClusterGUIDs;      ///< Global unique cluster ids(stored for debug).
 };
 } // namespace Falcor

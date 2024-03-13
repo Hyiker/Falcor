@@ -50,7 +50,7 @@ public:
          * @param index The index refers to a collection of locality links.
          * @param cost The corresponding cost.
          */
-        void addLocalityLink(uint32_t index, idx_t cost)
+        void addLocalityLinks(uint32_t index, idx_t cost)
         {
             auto range = mPartitioner.mLocalityLinks.equal_range(index);
             for (auto it = range.first; it != range.second; it++)
@@ -153,5 +153,6 @@ private:
 
     uint32_t mNumElements;
     friend struct GraphData;
+    friend class NaniteDataBuilder;
 };
 } // namespace Falcor

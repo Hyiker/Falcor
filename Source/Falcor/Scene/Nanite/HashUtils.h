@@ -17,6 +17,16 @@ FALCOR_FORCEINLINE uint32_t murmurFinalize32(uint32_t hash)
     return hash;
 }
 
+FALCOR_FORCEINLINE uint64_t murmurFinalize64(uint64_t hash)
+{
+    hash ^= hash >> 33;
+    hash *= 0xff51afd7ed558ccdull;
+    hash ^= hash >> 33;
+    hash *= 0xc4ceb9fe1a85ec53ull;
+    hash ^= hash >> 33;
+    return hash;
+}
+
 /**
  * @brief Murmur32 fast hash function.
  *

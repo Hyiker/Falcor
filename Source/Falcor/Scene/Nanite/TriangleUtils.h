@@ -46,6 +46,29 @@ FALCOR_FORCEINLINE uint32_t triangleIndexCycle(uint32_t value)
     return value - valueMod3 + value1Mod3;
 }
 
+struct PackedStaticVertexDataEqual
+{
+    FALCOR_FORCEINLINE bool operator()(const PackedStaticVertexData& lhs, const PackedStaticVertexData& rhs) const
+    {
+        return all(lhs.position == rhs.position) && all(lhs.packedNormalTangentCurveRadius == rhs.packedNormalTangentCurveRadius) &&
+               all(lhs.texCrd == rhs.texCrd);
+    }
+};
+
+struct PackedStaticVertexDataHash
+{
+    FALCOR_FORCEINLINE uint32_t operator()(const PackedStaticVertexData& vertex) const
+    {
+        return murmur32(
+            {hashPosition(vertex.position), hashPosition(vertex.packedNormalTangentCurveRadius), hashPosition(float3(vertex.texCrd, 0.0f))}
+        );
+    }
+};
+
+template<typename ValueType>
+using PackedStaticVertexHashMap =
+    std::unordered_map<PackedStaticVertexData, ValueType, PackedStaticVertexDataHash, PackedStaticVertexDataEqual>;
+
 /**
  * @brief Helper class to hash edges.
  * Maps from edge hash(vertex pos0, vertex pos1) to edge indices(may be redundant).
@@ -69,11 +92,13 @@ public:
      * @brief Iterate through all edges with the same hash but the opposite direction.
      *
      * @param edgeIndex The index of the edge.
+     * @param addEdge Whether to add the input edge into hashmap.
      * @param getPosition A function to get the position of a vertex by the edge index.
      * @param callback Callback function for handling the opposite direction edge, passing in the edgeIndex and otherEdgeIndex.
      */
     void forEachEdgeWithOppositeDirection(
         uint32_t edgeIndex,
+        bool addEdge,
         std::function<float3(uint32_t)> getPosition,
         std::function<void(uint32_t, uint32_t)> callback
     );

@@ -670,6 +670,8 @@ target_sources(Falcor PRIVATE
     Utils/Math/ScalarMath.h
     Utils/Math/ScalarTypes.h
     Utils/Math/ShadingFrame.slang
+    Utils/Math/Sphere.cpp
+    Utils/Math/Sphere.h
     Utils/Math/SphericalHarmonics.slang
     Utils/Math/Vector.h
     Utils/Math/VectorMath.h

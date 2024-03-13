@@ -22,9 +22,3 @@
 [submodule "external/ptex"]
 	path = external/ptex
 	url = https://github.com/wdas/ptex.git
-[submodule "external/METIS"]
-	path = external/METIS
-	url = https://github.com/Hyiker/METIS.git
-[submodule "external/GKlib"]
-	path = external/GKlib
-	url = https://github.com/Hyiker/GKlib.git

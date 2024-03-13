@@ -3059,7 +3059,7 @@ void SceneBuilder::createNaniteData()
     {
         mpNaniteDataBuilder = std::make_unique<NaniteDataBuilder>();
     }
-    logInfo("Building Nanite data for {} meshes.", mSceneData.meshDesc.size());
+    logInfo("Building Nanite data for {} mesh(es).", mSceneData.meshDesc.size());
 
     mpNaniteDataBuilder->buildNaniteData(mSceneData.meshStaticData, mSceneData.meshIndexData, mMeshes);
 

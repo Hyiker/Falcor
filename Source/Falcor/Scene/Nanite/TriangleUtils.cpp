@@ -1,7 +1,7 @@
 #include "TriangleUtils.h"
 namespace Falcor
 {
-EdgeHash::EdgeHash(int size) : mEdgeHashmap(std::floor(std::log2(size))) {}
+EdgeHash::EdgeHash(int size) : mEdgeHashmap(1ull << uint32_t(std::floor(std::log2(size)))) {}
 
 void EdgeHash::addEdge(uint32_t edgeIndex, std::function<float3(uint32_t)> getPosition)
 {
@@ -17,6 +17,7 @@ void EdgeHash::addEdge(uint32_t edgeIndex, std::function<float3(uint32_t)> getPo
 
 void EdgeHash::forEachEdgeWithOppositeDirection(
     uint32_t edgeIndex,
+    bool addEdge,
     std::function<float3(uint32_t)> getPosition,
     std::function<void(uint32_t, uint32_t)> callback
 )
@@ -27,7 +28,7 @@ void EdgeHash::forEachEdgeWithOppositeDirection(
     uint32_t hash0 = hashPosition(pos0);
     uint32_t hash1 = hashPosition(pos1);
 
-    uint32_t hash = murmur32({hash0, hash1});
+    uint32_t hash = murmur32({hash1, hash0});
 
     auto range = mEdgeHashmap.equal_range(hash);
     for (auto it = range.first; it != range.second; it++)
@@ -40,6 +41,10 @@ void EdgeHash::forEachEdgeWithOppositeDirection(
         {
             callback(edgeIndex, otherEdgeIndex);
         }
+    }
+    if (addEdge)
+    {
+        mEdgeHashmap.emplace(murmur32({hash0, hash1}), edgeIndex);
     }
 }
 
