@@ -477,6 +477,10 @@ target_sources(Falcor PRIVATE
     Scene/Nanite/GraphPartitioner.cpp
     Scene/Nanite/GraphPartitioner.h
     Scene/Nanite/HashUtils.h
+    Scene/Nanite/MeshSimplifier.cpp
+    Scene/Nanite/MeshSimplifier.h
+    Scene/Nanite/MeshOptimizer.cpp
+    Scene/Nanite/MeshOptimizer.h
     Scene/Nanite/NaniteDataBuilder.cpp
     Scene/Nanite/NaniteDataBuilder.h
     Scene/Nanite/TriangleUtils.cpp
@@ -991,6 +995,9 @@ target_compile_definitions(Falcor
     FALCOR_DLL
     $<$<PLATFORM_ID:Windows>:IMGUI_API=__declspec\(dllexport\)>
     $<$<PLATFORM_ID:Linux>:IMGUI_API=__attribute__\(\(visibility\("default"\)\)\)>
+
+    # Endianess.
+    FALCOR_LITTLE_ENDIAN=$<BOOL:${FALCOR_LITTLE_ENDIAN}>
 )
 
 if(FALCOR_USE_SYSTEM_PYTHON)
@@ -1013,7 +1020,7 @@ target_link_libraries(Falcor
     PRIVATE
     git_version
     FreeImage assimp OpenEXR OpenVDB lz4 zlib pugixml opensubdiv
-    glfw mikktspace nvtt Ptex_dynamic metis
+    glfw mikktspace nvtt Ptex_dynamic metis meshoptimizer
     $<$<BOOL:${FALCOR_HAS_D3D12}>:d3d12>
     $<$<BOOL:${FALCOR_HAS_D3D12_AGILITY_SDK}>:agility-sdk>
     $<$<BOOL:${FALCOR_HAS_AFTERMATH}>:aftermath>

@@ -46,28 +46,57 @@ FALCOR_FORCEINLINE uint32_t triangleIndexCycle(uint32_t value)
     return value - valueMod3 + value1Mod3;
 }
 
+/**
+ * @brief Compute the next triangle index in the size-3 cycle.
+ *
+ * @param value The current triangle index.
+ * @param offset The offset to add to the current triangle index.
+ * @return The next triangle index in the size-3 cycle.
+ */
+FALCOR_FORCEINLINE uint32_t triangleIndexCycle(uint32_t value, uint32_t offset)
+{
+    return value - value % 3 + (value + offset) % 3;
+}
+
+template<bool PositionOnly>
 struct PackedStaticVertexDataEqual
 {
     FALCOR_FORCEINLINE bool operator()(const PackedStaticVertexData& lhs, const PackedStaticVertexData& rhs) const
     {
-        return all(lhs.position == rhs.position) && all(lhs.packedNormalTangentCurveRadius == rhs.packedNormalTangentCurveRadius) &&
-               all(lhs.texCrd == rhs.texCrd);
+        if constexpr (PositionOnly)
+        {
+            return all(lhs.position == rhs.position);
+        }
+        else
+        {
+            return all(lhs.position == rhs.position) && all(lhs.packedNormalTangentCurveRadius == rhs.packedNormalTangentCurveRadius) &&
+                   all(lhs.texCrd == rhs.texCrd);
+        }
     }
 };
-
+template<bool PositionOnly>
 struct PackedStaticVertexDataHash
 {
     FALCOR_FORCEINLINE uint32_t operator()(const PackedStaticVertexData& vertex) const
     {
-        return murmur32(
-            {hashPosition(vertex.position), hashPosition(vertex.packedNormalTangentCurveRadius), hashPosition(float3(vertex.texCrd, 0.0f))}
-        );
+        if constexpr (PositionOnly)
+        {
+            return murmur32({hashPosition(vertex.position)});
+        }
+        else
+        {
+            return murmur32(
+                {hashPosition(vertex.position),
+                 hashPosition(vertex.packedNormalTangentCurveRadius),
+                 hashPosition(float3(vertex.texCrd, 0.0f))}
+            );
+        }
     }
 };
 
-template<typename ValueType>
+template<typename ValueType, bool PositionOnly = false>
 using PackedStaticVertexHashMap =
-    std::unordered_map<PackedStaticVertexData, ValueType, PackedStaticVertexDataHash, PackedStaticVertexDataEqual>;
+    std::unordered_map<PackedStaticVertexData, ValueType, PackedStaticVertexDataHash<PositionOnly>, PackedStaticVertexDataEqual<PositionOnly>>;
 
 /**
  * @brief Helper class to hash edges.

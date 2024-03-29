@@ -49,9 +49,9 @@ public:
         const GraphPartitioner::Range& triangleRange
     );
 
-    /** Compute bounding box and spheres.
+    /** Finalize cluster, compute bounding data, areas etc.
      */
-    void computeBounds();
+    void finalize();
 
     /**
      * @brief Partition the cluster into smaller clusters.
@@ -67,7 +67,7 @@ public:
      * @param targetTriangleCount The target triangle count.
      * @return The error metric.
      */
-    float simplify(uint32_t targetTriangleCount);
+    float simplify(uint32_t targetTriangleCount, float targetError = 0.f, uint32_t maxTriangles = 0u);
 
     static Cluster merge(fstd::span<const Cluster> clusters);
 
@@ -85,6 +85,8 @@ public:
 
     auto getVertex(uint32_t vertexIndex) const { return mVertices[mIndices[vertexIndex]]; }
 
+    void saveToFile(const std::filesystem::path& p) const;
+
 private:
     uint64_t mGUID = 0ull; ///< Global unique cluster id
     // Mesh data
@@ -92,6 +94,8 @@ private:
     std::vector<uint32_t> mIndices;
     std::vector<bool> mBoundaryEdges;
     std::vector<uint8_t> mExternalEdges;
+
+    float mSurfaceArea = 0.f;
 
     std::map<uint32_t, uint32_t> mAdjacentClusters; ///< Mapping from clusterIndex -> shared edges count
 

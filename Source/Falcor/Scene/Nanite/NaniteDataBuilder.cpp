@@ -243,14 +243,14 @@ void NaniteDataBuilder::reduceDAG(std::atomic_uint32_t& clusterCount, fstd::span
         int targetNumTris = numParents * targetClusterSize;
 
         // Simplify merged cluster here
-        parentMaxLODError = merged.simplify(targetNumTris);
+        parentMaxLODError = merged.simplify(targetNumTris, 0.1f);
 
         if (numParents == 1)
         {
             parentEnd = clusterCount += numParents;
             parentStart = parentEnd - numParents;
 
-            merged.computeBounds();
+            merged.finalize();
             mClusters[parentStart] = std::move(merged);
             break;
         }

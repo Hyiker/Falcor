@@ -1,4 +1,8 @@
+#include <assimp/Exporter.hpp>
+#include <assimp/scene.h>
+
 #include "Cluster.h"
+#include "MeshOptimizer.h"
 namespace Falcor
 {
 Cluster::Cluster(
@@ -68,7 +72,7 @@ Cluster::Cluster(
     mIndices.shrink_to_fit();
     mExternalEdges.shrink_to_fit();
 
-    computeBounds();
+    finalize();
 }
 
 Cluster::Cluster(
@@ -135,225 +139,99 @@ Cluster::Cluster(
     mIndices.shrink_to_fit();
     mExternalEdges.shrink_to_fit();
 
-    computeBounds();
+    finalize();
 }
 
-void Cluster::computeBounds()
+void Cluster::finalize()
 {
     mBoundingBox = AABB();
+    mSurfaceArea = 0.f;
+
     for (const auto& vertex : mVertices)
     {
         mBoundingBox.include(vertex.position);
     }
+
+    for (uint32_t i = 0; i < mIndices.size(); i += 3)
+    {
+        float3 v0 = mVertices[mIndices[i + 0]].position;
+        float3 v1 = mVertices[mIndices[i + 1]].position;
+        float3 v2 = mVertices[mIndices[i + 2]].position;
+
+        mSurfaceArea += length(cross(v1 - v0, v2 - v0));
+    }
+
+    mSurfaceArea *= 0.5f;
 }
 
-float Cluster::simplify(uint32_t targetTriangleCount)
+float Cluster::simplify(uint32_t targetTriangleCount, float targetError, uint32_t maxTriangles)
 {
-#if 0
-    if ((TargetNumTris >= NumTris && TargetError == 0.0f) || LimitNumTris >= NumTris)
+    uint32_t triangleCount = mIndices.size() / 3;
+    if ((targetTriangleCount >= triangleCount && targetError == 0.0f) || maxTriangles >= triangleCount)
     {
         return 0.0f;
     }
 
-    float UVArea[MAX_STATIC_TEXCOORDS] = {0.0f};
+    float triangleSize = std::sqrt(mSurfaceArea / (float)triangleCount);
 
-    for (uint32 TriIndex = 0; TriIndex < NumTris; TriIndex++)
+    // save border edges
+    auto float3Cmp = [](const float3& a, const float3& b)
     {
-        uint32 Index0 = Indexes[TriIndex * 3 + 0];
-        uint32 Index1 = Indexes[TriIndex * 3 + 1];
-        uint32 Index2 = Indexes[TriIndex * 3 + 2];
-
-        FVector2f* UV0 = GetUVs(Index0);
-        FVector2f* UV1 = GetUVs(Index1);
-        FVector2f* UV2 = GetUVs(Index2);
-
-        for (uint32 UVIndex = 0; UVIndex < NumTexCoords; UVIndex++)
+        if (a.x != b.x)
+            return a.x < b.x;
+        if (a.y != b.y)
+            return a.y < b.y;
+        return a.z < b.z;
+    };
+    auto float3PairCmp = [&float3Cmp](const std::pair<float3, float3>& a, const std::pair<float3, float3>& b)
+    {
+        if (!all(a.first == b.first))
+            return float3Cmp(a.first, b.first);
+        return float3Cmp(a.second, b.second);
+    };
+    std::map<std::pair<float3, float3>, uint8_t, decltype(float3PairCmp)> lockedEdges(float3PairCmp);
+    for (uint32_t edgeIndex = 0; edgeIndex < mExternalEdges.size(); edgeIndex++)
+    {
+        if (mExternalEdges[edgeIndex])
         {
-            FVector2f EdgeUV1 = UV1[UVIndex] - UV0[UVIndex];
-            FVector2f EdgeUV2 = UV2[UVIndex] - UV0[UVIndex];
-            float SignedArea = 0.5f * (EdgeUV1 ^ EdgeUV2);
-            UVArea[UVIndex] += FMath::Abs(SignedArea);
+            uint32_t vertIndex0 = mIndices[edgeIndex];
+            uint32_t vertIndex1 = mIndices[triangleIndexCycle(edgeIndex)];
 
-            // Force an attribute discontinuity for UV mirroring edges.
-            // Quadric could account for this but requires much larger UV weights which raises error on meshes which have no visible issues
-            // otherwise.
-            MaterialIndexes[TriIndex] |= (SignedArea >= 0.0f ? 1 : 0) << (UVIndex + 24);
+            const float3& position0 = getVertex(edgeIndex).position;
+            const float3& position1 = getVertex(triangleIndexCycle(edgeIndex)).position;
+
+            lockedEdges.emplace(std::make_pair(position0, position1), mExternalEdges[edgeIndex]);
         }
     }
 
-    float TriangleSize = FMath::Sqrt(SurfaceArea / (float)NumTris);
+    FALCOR_CHECK(targetError >= 0.0f && targetError <= 1.f, "Invalid target error: {}", targetError);
 
-    FFloat32 CurrentSize(FMath::Max(TriangleSize, THRESH_POINTS_ARE_SAME));
-    FFloat32 DesiredSize(0.25f);
-    FFloat32 FloatScale(1.0f);
+    MeshOptimizer optimizer(mVertices, mIndices);
 
-    // Lossless scaling by only changing the float exponent.
-    int32 Exponent = FMath::Clamp((int)DesiredSize.Components.Exponent - (int)CurrentSize.Components.Exponent, -126, 127);
-    FloatScale.Components.Exponent = Exponent + 127; // ExpBias
-    // Scale ~= DesiredSize / CurrentSize
-    // When generating nanite fallback meshes, use the same weights as in FQuadricSimplifierMeshReduction::ReduceMeshDescription
-    // to ensure consistent LOD transition screen size.
-    float PositionScale = bForNaniteFallback ? 1.f : FloatScale.FloatValue;
+    float resultError = optimizer.simplify(targetTriangleCount, targetError);
 
-    for (uint32 i = 0; i < NumVerts; i++)
+    FALCOR_CHECK(optimizer.getSimplifiedIndicesCount() > 0, "Invalid simplified indices size");
+    FALCOR_CHECK(optimizer.getSimplifiedVerticesCount() > 0, "Invalid simplified vertices size");
+
+    triangleCount = optimizer.getSimplifiedIndicesCount() / 3;
+
+    mVertices.resize(optimizer.getSimplifiedVerticesCount());
+    mIndices.resize(optimizer.getSimplifiedIndicesCount());
+    mExternalEdges.resize(optimizer.getSimplifiedIndicesCount(), 0);
+
+    mExternalEdgeCount = 0;
+    for (int edgeIndex = 0; edgeIndex < mExternalEdges.size(); edgeIndex++)
     {
-        GetPosition(i) *= PositionScale;
-    }
-    TargetError *= PositionScale;
-
-    uint32 NumAttributes = GetVertSize() - 3;
-    float* AttributeWeights = (float*)FMemory_Alloca(NumAttributes * sizeof(float));
-    float* WeightsPtr = AttributeWeights;
-
-    // Normal
-    *WeightsPtr++ = bForNaniteFallback ? 16.f : 1.0f;
-    *WeightsPtr++ = bForNaniteFallback ? 16.f : 1.0f;
-    *WeightsPtr++ = bForNaniteFallback ? 16.f : 1.0f;
-
-    if (bHasTangents)
-    {
-        // Tangent X
-        *WeightsPtr++ = 0.0625f;
-        *WeightsPtr++ = 0.0625f;
-        *WeightsPtr++ = 0.0625f;
-
-        // Tangent Y Sign
-        *WeightsPtr++ = 0.5f;
-    }
-
-    if (bHasColors)
-    {
-        *WeightsPtr++ = bForNaniteFallback ? 0.1f : 0.0625f;
-        *WeightsPtr++ = bForNaniteFallback ? 0.1f : 0.0625f;
-        *WeightsPtr++ = bForNaniteFallback ? 0.1f : 0.0625f;
-        *WeightsPtr++ = bForNaniteFallback ? 0.1f : 0.0625f;
-    }
-
-    // Normalize UVWeights
-    for (uint32 UVIndex = 0; UVIndex < NumTexCoords; UVIndex++)
-    {
-        if (bForNaniteFallback)
+        auto edge = std::make_pair(getVertex(edgeIndex).position, getVertex(triangleIndexCycle(edgeIndex)).position);
+        if (auto it = lockedEdges.find(edge); it != lockedEdges.end())
         {
-            float MinUV = +FLT_MAX;
-            float MaxUV = -FLT_MAX;
-
-            for (uint32 TriIndex = 0; TriIndex < NumTris; TriIndex++)
-            {
-                uint32 Index0 = Indexes[TriIndex * 3 + 0];
-                uint32 Index1 = Indexes[TriIndex * 3 + 1];
-                uint32 Index2 = Indexes[TriIndex * 3 + 2];
-
-                FVector2f UV0 = GetUVs(Index0)[UVIndex];
-                FVector2f UV1 = GetUVs(Index1)[UVIndex];
-                FVector2f UV2 = GetUVs(Index2)[UVIndex];
-
-                MinUV = FMath::Min(MinUV, UV0.X);
-                MinUV = FMath::Min(MinUV, UV0.Y);
-                MinUV = FMath::Min(MinUV, UV1.X);
-                MinUV = FMath::Min(MinUV, UV1.Y);
-                MinUV = FMath::Min(MinUV, UV2.X);
-                MinUV = FMath::Min(MinUV, UV2.Y);
-
-                MaxUV = FMath::Max(MaxUV, UV0.X);
-                MaxUV = FMath::Max(MaxUV, UV0.Y);
-                MaxUV = FMath::Max(MaxUV, UV1.X);
-                MaxUV = FMath::Max(MaxUV, UV1.Y);
-                MaxUV = FMath::Max(MaxUV, UV2.X);
-                MaxUV = FMath::Max(MaxUV, UV2.Y);
-            }
-
-            *WeightsPtr++ = 0.5f / FMath::Max(1.f, MaxUV - MinUV);
-            *WeightsPtr++ = 0.5f / FMath::Max(1.f, MaxUV - MinUV);
-        }
-        else
-        {
-            float TriangleUVSize = FMath::Sqrt(UVArea[UVIndex] / (float)NumTris);
-            TriangleUVSize = FMath::Max(TriangleUVSize, THRESH_UVS_ARE_SAME);
-
-            *WeightsPtr++ = 1.0f / (128.0f * TriangleUVSize);
-            *WeightsPtr++ = 1.0f / (128.0f * TriangleUVSize);
-        }
-    }
-    check((WeightsPtr - AttributeWeights) == NumAttributes);
-
-    FMeshSimplifier Simplifier(Verts.GetData(), NumVerts, Indexes.GetData(), Indexes.Num(), MaterialIndexes.GetData(), NumAttributes);
-
-    TMap<TTuple<FVector3f, FVector3f>, int8> LockedEdges;
-
-    for (int32 EdgeIndex = 0; EdgeIndex < ExternalEdges.Num(); EdgeIndex++)
-    {
-        if (ExternalEdges[EdgeIndex])
-        {
-            uint32 VertIndex0 = Indexes[EdgeIndex];
-            uint32 VertIndex1 = Indexes[Cycle3(EdgeIndex)];
-
-            const FVector3f& Position0 = GetPosition(VertIndex0);
-            const FVector3f& Position1 = GetPosition(VertIndex1);
-
-            Simplifier.LockPosition(Position0);
-            Simplifier.LockPosition(Position1);
-
-            LockedEdges.Add(MakeTuple(Position0, Position1), ExternalEdges[EdgeIndex]);
+            uint8_t adjCount = it->second;
+            mExternalEdges[edgeIndex] = adjCount;
+            mExternalEdgeCount++;
         }
     }
 
-    Simplifier.SetAttributeWeights(AttributeWeights);
-    Simplifier.SetCorrectAttributes(CorrectAttributesFunctions[bHasTangents][bHasColors]);
-    Simplifier.SetEdgeWeight(bForNaniteFallback ? 512.f : 2.0f);
-
-    if (bForNaniteFallback)
-    {
-        Simplifier.SetLimitErrorToSurfaceArea(false);
-        Simplifier.DegreePenalty = 100.0f;
-        Simplifier.InversionPenalty = 1000000.0f;
-    }
-
-    float MaxErrorSqr = Simplifier.Simplify(NumVerts, TargetNumTris, FMath::Square(TargetError), 0, LimitNumTris, MAX_flt);
-
-    check(Simplifier.GetRemainingNumVerts() > 0);
-    check(Simplifier.GetRemainingNumTris() > 0);
-
-    if (bPreserveArea)
-        Simplifier.PreserveSurfaceArea();
-
-    Simplifier.Compact();
-
-    Verts.SetNum(Simplifier.GetRemainingNumVerts() * GetVertSize());
-    Indexes.SetNum(Simplifier.GetRemainingNumTris() * 3);
-    MaterialIndexes.SetNum(Simplifier.GetRemainingNumTris());
-    ExternalEdges.Init(0, Simplifier.GetRemainingNumTris() * 3);
-
-    NumVerts = Simplifier.GetRemainingNumVerts();
-    NumTris = Simplifier.GetRemainingNumTris();
-
-    NumExternalEdges = 0;
-    for (int32 EdgeIndex = 0; EdgeIndex < ExternalEdges.Num(); EdgeIndex++)
-    {
-        auto Edge = MakeTuple(GetPosition(Indexes[EdgeIndex]), GetPosition(Indexes[Cycle3(EdgeIndex)]));
-        int8* AdjCount = LockedEdges.Find(Edge);
-        if (AdjCount)
-        {
-            ExternalEdges[EdgeIndex] = *AdjCount;
-            NumExternalEdges++;
-        }
-    }
-
-    float InvScale = 1.0f / PositionScale;
-    for (uint32 i = 0; i < NumVerts; i++)
-    {
-        GetPosition(i) *= InvScale;
-        Bounds += GetPosition(i);
-    }
-
-    for (uint32 TriIndex = 0; TriIndex < NumTris; TriIndex++)
-    {
-        // Remove UV mirroring bits
-        MaterialIndexes[TriIndex] &= 0xffffff;
-    }
-
-    return FMath::Sqrt(MaxErrorSqr) * InvScale;
-#endif
-    return 0.0f;
+    return resultError;
 }
 
 void Cluster::split(GraphPartitioner& partitioner, const EdgeAdjacency& adjacency) const
@@ -426,10 +304,11 @@ Cluster Cluster::merge(fstd::span<const Cluster*> pClusters)
     merged.mExternalEdges.reserve(predTriCount * 3);
     merged.mExternalEdgeCount = 0;
 
-    PackedStaticVertexHashMap<uint32_t> vertexMap;
+    PackedStaticVertexHashMap<uint32_t, true> vertexMap;
     for (const auto& pCluster : pClusters)
     {
         merged.mBoundingBox |= pCluster->mBoundingBox;
+        merged.mSurfaceArea += pCluster->mSurfaceArea;
 
         for (uint32_t i = 0; i < pCluster->mIndices.size(); i++)
         {
@@ -513,5 +392,65 @@ EdgeAdjacency Cluster::getEdgeAdjacency() const
         );
     }
     return adjacency;
+}
+
+aiScene* createAssimpScene(fstd::span<const PackedStaticVertexData> vertices, fstd::span<const uint32_t> indices)
+{
+    auto* scene = new aiScene();
+
+    scene->mRootNode = new aiNode();
+
+    scene->mMaterials = new aiMaterial*[1];
+    scene->mNumMaterials = 1;
+    scene->mMaterials[0] = new aiMaterial();
+
+    scene->mMeshes = new aiMesh*[1];
+    scene->mMeshes[0] = new aiMesh();
+    scene->mNumMeshes = 1;
+
+    scene->mRootNode->mMeshes = new unsigned int[1];
+    scene->mRootNode->mMeshes[0] = 0;
+    scene->mRootNode->mNumMeshes = 1;
+
+    aiMesh* mesh = scene->mMeshes[0];
+    mesh->mVertices = new aiVector3D[vertices.size()];
+    mesh->mNumVertices = vertices.size();
+
+    for (unsigned int i = 0; i < vertices.size(); ++i)
+    {
+        mesh->mVertices[i] = aiVector3D(vertices[i].position.x, vertices[i].position.y, vertices[i].position.z);
+    }
+
+    mesh->mFaces = new aiFace[indices.size() / 3];
+    mesh->mNumFaces = indices.size() / 3;
+
+    for (unsigned int i = 0; i < mesh->mNumFaces; ++i)
+    {
+        aiFace& face = mesh->mFaces[i];
+        face.mIndices = new unsigned int[3];
+        face.mNumIndices = 3;
+
+        face.mIndices[0] = indices[i * 3];
+        face.mIndices[1] = indices[i * 3 + 1];
+        face.mIndices[2] = indices[i * 3 + 2];
+    }
+
+    return scene;
+}
+
+void Cluster::saveToFile(const std::filesystem::path& p) const
+{
+    FALCOR_CHECK(p.extension() == ".obj", "Only support .obj export");
+    auto* scene = createAssimpScene(mVertices, mIndices);
+
+    Assimp::Exporter exporter;
+    aiReturn ret = exporter.Export(scene, "obj", p.string());
+
+    if (ret != aiReturn_SUCCESS)
+    {
+        logError("Assimp export failure: {}", exporter.GetErrorString());
+    }
+
+    delete scene;
 }
 } // namespace Falcor
