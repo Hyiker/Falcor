@@ -10,19 +10,13 @@ namespace Falcor
 class FALCOR_API NaniteDataBuilder
 {
 public:
+    using MeshSpec = SceneBuilder::MeshSpec;
     /**
      * @brief Build the Nanite data for the scene.
-     * @param[in] vertices The vertices of the scene.
-     * @param[in] triangleIndices The triangle indices of the scene.
+     * Static meshes will be converted to clusters, and related data will be removed from MeshSpec.
      * @param[in] meshList The specifications of the meshes.
      */
-    void buildNaniteData(
-        fstd::span<const PackedStaticVertexData> vertices,
-        fstd::span<const uint32_t> triangleIndices,
-        fstd::span<const SceneBuilder::MeshSpec> meshList
-    );
-
-    auto getClusterGUIDs() const { return mClusterGUIDs; }
+    void buildNaniteData(std::vector<MeshSpec>& meshList);
 
 private:
     /**
@@ -34,9 +28,9 @@ private:
      * @return The clustering result of the mesh.
      */
     std::vector<Cluster> clusterTriangles(
-        fstd::span<const PackedStaticVertexData> vertices,
+        fstd::span<const StaticVertexData> vertices,
         fstd::span<const uint32_t> triangleIndices,
-        const SceneBuilder::MeshSpec& meshSpec
+        const MeshSpec& meshSpec
     );
 
     /**
@@ -71,6 +65,7 @@ private:
 
     std::vector<Cluster> mClusters;           ///< Original clusters data.
     std::vector<ClusterGroup> mClusterGroups; ///< Flattened hierarchical cluster groups.
-    std::vector<uint64_t> mClusterGUIDs;      ///< Global unique cluster ids(stored for debug).
+
+    friend class SceneBuilder;
 };
 } // namespace Falcor

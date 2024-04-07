@@ -55,33 +55,45 @@ import Rendering.Materials.TexLODHelpers;
 #endif
 
 /** Scene data required for rendering.
-*/
+ */
 struct Scene
 {
     // DEMO21
     static bool kUseLightProfile = SCENE_USE_LIGHT_PROFILE;
 
     // Raytracing
-    [root] RaytracingAccelerationStructure rtAccel;
+    [root]
+    RaytracingAccelerationStructure rtAccel;
 
     // Instance transforms
-    [root] StructuredBuffer<float4x4> worldMatrices;
-    [root] StructuredBuffer<float4x4> inverseTransposeWorldMatrices;
+    [root]
+    StructuredBuffer<float4x4> worldMatrices;
+    [root]
+    StructuredBuffer<float4x4> inverseTransposeWorldMatrices;
     StructuredBuffer<float4x4> prevWorldMatrices;
     StructuredBuffer<float4x4> prevInverseTransposeWorldMatrices;
 
     // Instances
-    [root] StructuredBuffer<GeometryInstanceData> geometryInstances;
+    [root]
+    StructuredBuffer<GeometryInstanceData> geometryInstances;
 
     // Triangle meshes
     StructuredBuffer<MeshDesc> meshes;
 
-    [root] StructuredBuffer<PackedStaticVertexData> vertices;       ///< Vertex data for this frame.
-    StructuredBuffer<PrevVertexData> prevVertices;                  ///< Vertex data for the previous frame, for dynamic meshes only.
+    [root]
+    StructuredBuffer<PackedStaticVertexData> vertices; ///< Vertex data for this frame.
+    StructuredBuffer<PrevVertexData> prevVertices;     ///< Vertex data for the previous frame, for dynamic meshes only.
 #if SCENE_HAS_INDEXED_VERTICES
-    [root] ByteAddressBuffer indexData;                             ///< Vertex indices, three indices per triangle packed tightly. The format is specified per mesh.
-    #endif
-    [root] StructuredBuffer<uint64_t> clusterGUIDs;                 ///< Triangle GUIDs for clustering.
+    [root]
+    ByteAddressBuffer indexData; ///< Vertex indices, three indices per triangle packed tightly. The format is specified per mesh.
+#endif
+
+    // Clusters
+    StructuredBuffer<ClusterDesc> clusters;
+    [root]
+    StructuredBuffer<PackedStaticVertexData> clusterVertices; ///< Vertex data for this frame.
+    [root]
+    ByteAddressBuffer clusterIndexData; ///< Vertex indices, three indices per triangle packed tightly.
 
     // Curves
     StructuredBuffer<CurveDesc> curves;
@@ -94,7 +106,7 @@ struct Scene
     SDFGrid sdfGrids[ArrayMax<1, SCENE_SDF_GRID_COUNT>.value]; // Zero-length arrays are not supported.
 
     // Procedural primitives
-    StructuredBuffer<AABB> proceduralPrimitiveAABBs;                ///< Global list of AABBs for procedural primitives (curves, custom primitives, etc.).
+    StructuredBuffer<AABB> proceduralPrimitiveAABBs; ///< Global list of AABBs for procedural primitives (curves, custom primitives, etc.).
 
     // Custom primitives
     uint customPrimitiveInstanceOffset;
@@ -126,21 +138,16 @@ struct Scene
     */
     GeometryType getGeometryInstanceType(const GeometryInstanceID instanceID)
     {
-        if (instanceID.index >= customPrimitiveInstanceOffset) return GeometryType::Custom;
+        if (instanceID.index >= customPrimitiveInstanceOffset)
+            return GeometryType::Custom;
         return geometryInstances[instanceID.index].getType();
     }
 
     // Mesh and instance data access
 
-    float4x4 loadWorldFromInstance(const uint matrixID)
-    {
-        return loadWorldMatrix(matrixID);
-    }
+    float4x4 loadWorldFromInstance(const uint matrixID) { return loadWorldMatrix(matrixID); }
 
-    float4x4 loadInstanceFromWorld(const uint matrixID)
-    {
-        return transpose(inverseTransposeWorldMatrices[matrixID]);
-    }
+    float4x4 loadInstanceFromWorld(const uint matrixID) { return transpose(inverseTransposeWorldMatrices[matrixID]); }
 
     float4x4 getWorldFromInstance(const GeometryInstanceID instanceID)
     {
@@ -154,25 +161,13 @@ struct Scene
         return loadInstanceFromWorld(matrixID);
     }
 
-    float4x4 loadWorldMatrix(const uint matrixID)
-    {
-        return worldMatrices[matrixID];
-    }
+    float4x4 loadWorldMatrix(const uint matrixID) { return worldMatrices[matrixID]; }
 
-    float4x4 loadPrevWorldMatrix(const uint matrixID)
-    {
-        return prevWorldMatrices[matrixID];
-    }
+    float4x4 loadPrevWorldMatrix(const uint matrixID) { return prevWorldMatrices[matrixID]; }
 
-    float3x3 loadInverseTransposeWorldMatrix(const uint matrixID)
-    {
-        return float3x3(inverseTransposeWorldMatrices[matrixID]);
-    }
+    float3x3 loadInverseTransposeWorldMatrix(const uint matrixID) { return float3x3(inverseTransposeWorldMatrices[matrixID]); }
 
-    float3x3 loadPrevInverseTransposeWorldMatrix(const uint matrixID)
-    {
-        return float3x3(prevInverseTransposeWorldMatrices[matrixID]);
-    }
+    float3x3 loadPrevInverseTransposeWorldMatrix(const uint matrixID) { return float3x3(prevInverseTransposeWorldMatrices[matrixID]); }
 
     float4x4 getWorldMatrix(const GeometryInstanceID instanceID)
     {
@@ -213,15 +208,11 @@ struct Scene
         return (geometryInstances[instanceID.index].flags & uint(GeometryInstanceFlags::IsWorldFrontFaceCW)) != 0;
     }
 
-    GeometryInstanceData getGeometryInstance(const GeometryInstanceID instanceID)
-    {
-        return geometryInstances[instanceID.index];
-    }
+    GeometryInstanceData getGeometryInstance(const GeometryInstanceID instanceID) { return geometryInstances[instanceID.index]; }
 
-    MeshDesc getMeshDesc(const GeometryInstanceID instanceID)
-    {
-        return meshes[geometryInstances[instanceID.index].geometryID];
-    }
+    MeshDesc getMeshDesc(const GeometryInstanceID instanceID) { return meshes[geometryInstances[instanceID.index].geometryID]; }
+
+    ClusterDesc getClusterDesc(const GeometryInstanceID instanceID) { return clusters[geometryInstances[instanceID.index].geometryID]; }
 
     // Materials access
 
@@ -229,44 +220,23 @@ struct Scene
         \param[in] instanceID Global geometry instance ID.
         \return Material ID.
     */
-    uint getMaterialID(const GeometryInstanceID instanceID)
-    {
-        return geometryInstances[instanceID.index].materialID;
-    };
+    uint getMaterialID(const GeometryInstanceID instanceID) { return geometryInstances[instanceID.index].materialID; };
 
     // Lights access
 
-    uint getLightCount()
-    {
-        return lightCount;
-    }
+    uint getLightCount() { return lightCount; }
 
-    LightData getLight(uint lightIndex)
-    {
-        return lights[lightIndex];
-    }
+    LightData getLight(uint lightIndex) { return lights[lightIndex]; }
 
     // Volume access
 
-    uint getGridCount()
-    {
-        return SCENE_GRID_COUNT;
-    }
+    uint getGridCount() { return SCENE_GRID_COUNT; }
 
-    void getGrid(const uint gridIndex, out Grid grid)
-    {
-        grid = grids[gridIndex];
-    }
+    void getGrid(const uint gridIndex, out Grid grid) { grid = grids[gridIndex]; }
 
-    uint getGridVolumeCount()
-    {
-        return gridVolumeCount;
-    }
+    uint getGridVolumeCount() { return gridVolumeCount; }
 
-    GridVolume getGridVolume(const uint volumeIndex)
-    {
-        return gridVolumes[volumeIndex];
-    }
+    GridVolume getGridVolume(const uint volumeIndex) { return gridVolumes[volumeIndex]; }
 
     // Geometry access
 
@@ -288,7 +258,7 @@ struct Scene
 #elif SCENE_HAS_32BIT_INDICES
         bool read16Bit = false;
 #else
-        #error Scene vertex formats are not specified
+#error Scene vertex formats are not specified
 #endif
         // Load the vertex indices.
         uint baseIndex = ibOffset * 4;
@@ -307,6 +277,23 @@ struct Scene
         uint baseIndex = triangleIndex * 3;
         uint3 vtxIndices = { baseIndex, baseIndex + 1, baseIndex + 2 };
 #endif
+        return vtxIndices;
+    }
+
+    /** Returns the local vertex indices for a given triangle.
+    \param[in] ibOffset Offset into the index buffer.
+    \param[in] triangleIndex Index of the triangle.
+    \param[in] use16Bit Flag indicating that the indices are stored in 16-bit format.
+    \return Vertex indices local to the current mesh.
+    */
+    uint3 getClusterLocalIndices(const uint ibOffset, const uint triangleIndex)
+    {
+        // Load the vertex indices.
+        uint baseIndex = ibOffset * 4;
+        uint3 vtxIndices;
+
+        baseIndex += triangleIndex * 12;
+        vtxIndices = clusterIndexData.Load3(baseIndex);
         return vtxIndices;
     }
 
@@ -331,7 +318,10 @@ struct Scene
     uint3 getIndices(const GeometryInstanceID instanceID, const uint triangleIndex)
     {
         const GeometryInstanceData instance = getGeometryInstance(instanceID);
-        uint3 vtxIndices = getLocalIndices(instance.ibOffset, triangleIndex, instance.flags & uint(GeometryInstanceFlags::Use16BitIndices));
+        uint3 vtxIndices =
+            instance.isNaniteMesh()
+                ? getClusterLocalIndices(instance.ibOffset, triangleIndex)
+                : getLocalIndices(instance.ibOffset, triangleIndex, instance.flags & uint(GeometryInstanceFlags::Use16BitIndices));
         vtxIndices += instance.vbOffset;
         return vtxIndices;
     }
@@ -340,33 +330,13 @@ struct Scene
         \param[in] index Global vertex index.
         \return Vertex data.
     */
-    StaticVertexData getVertex(const uint index)
-    {
-        return vertices[index].unpack();
-    }
+    StaticVertexData getVertex(const uint index) { return vertices[index].unpack(); }
 
-    /** Returns cluster index data by vertex index.
-        \param[in] index Global triangle index.
-        \return Cluster GUID.
+    /** Returns vertex data for a vertex.
+        \param[in] index Global vertex index.
+        \return Vertex data.
     */
-    uint64_t getClusterGUID(const uint index){
-        return clusterGUIDs[index];
-    }
-
-    /** Returns cluster index data for a given triangle.
-        \param[in] instanceID Geometry instance ID of the mesh.
-        \param[in] triangleIndex Index of the triangle in the given mesh.
-        \return Cluster GUID.
-    */
-    uint64_t getClusterGUID(const GeometryInstanceID instanceID, const uint triangleIndex) {
-#if SCENE_HAS_INDEXED_VERTICES
-        const GeometryInstanceData instance = getGeometryInstance(instanceID);
-        uint triIndex = instance.ibOffset / 3 + triangleIndex;
-#else // !SCENE_HAS_INDEXED_VERTICES
-        uint triIndex = triangleIndex;
-#endif
-        return clusterGUIDs[triIndex];
-    }
+    StaticVertexData getClusterVertex(const uint index) { return clusterVertices[index].unpack(); }
 
     /** Returns a triangle's face normal in object space.
         \param[in] vertices Unpacked fetched vertices which can be used for further computations involving individual vertices.
@@ -394,7 +364,8 @@ struct Scene
         float3 p1 = vertices[vtxIndices[1]].position;
         float3 p2 = vertices[vtxIndices[2]].position;
         float3 N = cross(p1 - p0, p2 - p0);
-        if (isObjectFrontFaceCW(instanceID)) N = -N;
+        if (isObjectFrontFaceCW(instanceID))
+            N = -N;
         float3x3 worldInvTransposeMat = getInverseTransposeWorldMatrix(instanceID);
         return normalize(mul(worldInvTransposeMat, N));
     }
@@ -429,7 +400,8 @@ struct Scene
         triangleArea = 0.5f * length(N);
 
         // Flip the normal depending on final winding order in world space.
-        if (isWorldFrontFaceCW(instanceID)) N = -N;
+        if (isWorldFrontFaceCW(instanceID))
+            N = -N;
 
         return normalize(N);
     }
@@ -465,7 +437,13 @@ struct Scene
         \param[in] barycentrics Barycentric coordinates in the triangle.
         \return Interpolated vertex attributes.
     */
-    VertexData computeVertexData(const StaticVertexData vertices[3], const float4x4 worldMat, const float3x3 worldInvTransposeMat, const bool isFrontFaceCW, const float3 barycentrics)
+    VertexData computeVertexData(
+        const StaticVertexData vertices[3],
+        const float4x4 worldMat,
+        const float3x3 worldInvTransposeMat,
+        const bool isFrontFaceCW,
+        const float3 barycentrics
+    )
     {
         VertexData v = {};
 
@@ -511,10 +489,21 @@ struct Scene
         \param[out] Unpacked fetched vertices which can be used for further computations involving individual vertices.
         \return Interpolated vertex attributes.
     */
-    VertexData getVertexData(const GeometryInstanceID instanceID, const uint triangleIndex, const float3 barycentrics, out StaticVertexData vertices[3])
+    VertexData getVertexData(
+        const GeometryInstanceID instanceID,
+        const uint triangleIndex,
+        const float3 barycentrics,
+        out StaticVertexData vertices[3]
+    )
     {
         const uint3 vtxIndices = getIndices(instanceID, triangleIndex);
-        vertices = { gScene.getVertex(vtxIndices[0]), gScene.getVertex(vtxIndices[1]), gScene.getVertex(vtxIndices[2]) };
+        const GeometryInstanceData instance = getGeometryInstance(instanceID);
+        if (instance.isNaniteMesh())
+            vertices = {
+                gScene.getClusterVertex(vtxIndices[0]), gScene.getClusterVertex(vtxIndices[1]), gScene.getClusterVertex(vtxIndices[2])
+            };
+        else
+            vertices = { gScene.getVertex(vtxIndices[0]), gScene.getVertex(vtxIndices[1]), gScene.getVertex(vtxIndices[2]) };
 
         const float4x4 worldMat = gScene.getWorldMatrix(instanceID);
         const float3x3 worldInvTransposeMat = getInverseTransposeWorldMatrix(instanceID);
@@ -560,7 +549,9 @@ struct Scene
     VertexData getVertexData(const DisplacedTriangleHit hit, const float3 viewDir)
     {
         const uint3 vtxIndices = getIndices(hit.instanceID, hit.primitiveIndex);
-        const StaticVertexData vertices[3] = { gScene.getVertex(vtxIndices[0]), gScene.getVertex(vtxIndices[1]), gScene.getVertex(vtxIndices[2]) };
+        const StaticVertexData vertices[3] = {
+            gScene.getVertex(vtxIndices[0]), gScene.getVertex(vtxIndices[1]), gScene.getVertex(vtxIndices[2])
+        };
         const float3 barycentrics = hit.getBarycentricWeights();
         const float4x4 worldMat = gScene.getWorldMatrix(hit.instanceID);
         const float3x3 worldInvTransposeMat = getInverseTransposeWorldMatrix(hit.instanceID);
@@ -568,7 +559,8 @@ struct Scene
         VertexData v = computeVertexData(vertices, worldMat, worldInvTransposeMat, isFrontFaceCW, barycentrics);
 
         // Offset surface along the displaced direction to avoid self-intersections because of precision.
-        v.posW += v.normalW * (hit.displacement * DisplacementData::kSurfaceSafetyScaleBias.x + DisplacementData::kSurfaceSafetyScaleBias.y);
+        v.posW +=
+            v.normalW * (hit.displacement * DisplacementData::kSurfaceSafetyScaleBias.x + DisplacementData::kSurfaceSafetyScaleBias.y);
 
         // Load displacement data.
         const uint materialID = getMaterialID(hit.instanceID);
@@ -577,7 +569,8 @@ struct Scene
 
         // Update face normal according to local displacement map values.
         // This is only an approximation in order to get plausible displaced face and smooth normals.
-        float3 adjustedFaceNormalW = computeDisplacedTriangleNormal(barycentrics, vertices, worldMat, worldInvTransposeMat, displacementData);
+        float3 adjustedFaceNormalW =
+            computeDisplacedTriangleNormal(barycentrics, vertices, worldMat, worldInvTransposeMat, displacementData);
 
         float dpVN = dot(viewDir, adjustedFaceNormalW);
         if (dpVN < 0.f)
@@ -592,7 +585,6 @@ struct Scene
 
         return v;
     }
-
 
     /** Returns interpolated vertex attributes in a ray tracing hit program when ray cones are used for texture LOD.
        \param[in] instanceID Geometry instance ID of the mesh.
@@ -640,7 +632,15 @@ struct Scene
         const GeometryInstanceData instance = getGeometryInstance(instanceID);
         uint3 vtxIndices = getLocalIndices(instance.ibOffset, triangleIndex, instance.flags & uint(GeometryInstanceFlags::Use16BitIndices));
 
-        if (instance.isDynamic())
+        if (instance.isNaniteMesh())
+        {
+            vtxIndices += instance.vbOffset;
+
+            prevPos += clusterVertices[vtxIndices[0]].position * barycentrics[0];
+            prevPos += clusterVertices[vtxIndices[1]].position * barycentrics[1];
+            prevPos += clusterVertices[vtxIndices[2]].position * barycentrics[2];
+        }
+        else if (instance.isDynamic())
         {
             // For dynamic meshes, the previous position is stored in a separate buffer.
             vtxIndices += meshes[instance.geometryID].prevVbOffset;
@@ -667,10 +667,7 @@ struct Scene
         \param[in] hit Triangle hit info.
         \return Interpolated position in world space for the previous frame.
     */
-    float3 getPrevPosW(const TriangleHit hit)
-    {
-        return getPrevPosW(hit.instanceID, hit.primitiveIndex, hit.getBarycentricWeights());
-    }
+    float3 getPrevPosW(const TriangleHit hit) { return getPrevPosW(hit.instanceID, hit.primitiveIndex, hit.getBarycentricWeights()); }
 
     /** Returns interpolated position on a displaced triangle in world space for the previous frame.
         \param[in] hit Displaced triangle hit info.
@@ -683,26 +680,40 @@ struct Scene
 
         const float3 barycentrics = hit.getBarycentricWeights();
         const GeometryInstanceData instance = getGeometryInstance(hit.instanceID);
-        uint3 vtxIndices = getLocalIndices(instance.ibOffset, hit.primitiveIndex, instance.flags & uint(GeometryInstanceFlags::Use16BitIndices));
+        uint3 vtxIndices =
+            getLocalIndices(instance.ibOffset, hit.primitiveIndex, instance.flags & uint(GeometryInstanceFlags::Use16BitIndices));
 
         // For non-dynamic meshes, the previous position/normal is the same as the current.
         vtxIndices += instance.vbOffset;
 
-        prevPos += vertices[vtxIndices[0]].position * barycentrics[0];
-        prevPos += vertices[vtxIndices[1]].position * barycentrics[1];
-        prevPos += vertices[vtxIndices[2]].position * barycentrics[2];
+        if (instance.isNaniteMesh())
+        {
+            prevPos += clusterVertices[vtxIndices[0]].position * barycentrics[0];
+            prevPos += clusterVertices[vtxIndices[1]].position * barycentrics[1];
+            prevPos += clusterVertices[vtxIndices[2]].position * barycentrics[2];
 
-        prevNormal += vertices[vtxIndices[0]].unpack().normal * barycentrics[0];
-        prevNormal += vertices[vtxIndices[1]].unpack().normal * barycentrics[1];
-        prevNormal += vertices[vtxIndices[2]].unpack().normal * barycentrics[2];
+            prevNormal += clusterVertices[vtxIndices[0]].unpack().normal * barycentrics[0];
+            prevNormal += clusterVertices[vtxIndices[1]].unpack().normal * barycentrics[1];
+            prevNormal += clusterVertices[vtxIndices[2]].unpack().normal * barycentrics[2];
+        }
+        else
+        {
+            prevPos += vertices[vtxIndices[0]].position * barycentrics[0];
+            prevPos += vertices[vtxIndices[1]].position * barycentrics[1];
+            prevPos += vertices[vtxIndices[2]].position * barycentrics[2];
+
+            prevNormal += vertices[vtxIndices[0]].unpack().normal * barycentrics[0];
+            prevNormal += vertices[vtxIndices[1]].unpack().normal * barycentrics[1];
+            prevNormal += vertices[vtxIndices[2]].unpack().normal * barycentrics[2];
+        }
 
         // Offset surface along the displaced direction to avoid self-intersections because of precision.
-        prevPos += prevNormal * (hit.displacement * DisplacementData::kSurfaceSafetyScaleBias.x + DisplacementData::kSurfaceSafetyScaleBias.y);
+        prevPos +=
+            prevNormal * (hit.displacement * DisplacementData::kSurfaceSafetyScaleBias.x + DisplacementData::kSurfaceSafetyScaleBias.y);
 
         const float4x4 prevWorldMat = loadPrevWorldMatrix(instance.globalMatrixID);
         return mul(prevWorldMat, float4(prevPos, 1.f)).xyz;
     }
-
 
     /** Returns a triangle's vertex positions in world space.
         \param[in] instanceID Geometry instance ID of the mesh.
@@ -740,10 +751,7 @@ struct Scene
 
     // Curve access
 
-    CurveDesc getCurveDesc(const GeometryInstanceID instanceID)
-    {
-        return curves[geometryInstances[instanceID.index].geometryID];
-    }
+    CurveDesc getCurveDesc(const GeometryInstanceID instanceID) { return curves[geometryInstances[instanceID.index].geometryID]; }
 
     /** Returns the global curve vertex indices for the first control point of a curve segment.
         \param[in] instanceID Geometry instance ID of the curve.
@@ -762,10 +770,7 @@ struct Scene
         \param[in] index Global curve vertex index.
         \return Curve vertex data.
     */
-    StaticCurveVertexData getCurveVertex(const uint index)
-    {
-        return curveVertices[index];
-    }
+    StaticCurveVertexData getCurveVertex(const uint index) { return curveVertices[index]; }
 
     /** Returns the interpolated vertex attributes for a curve segment.
         \param[in] instanceID Geometry instance ID of the curve.
@@ -844,10 +849,7 @@ struct Scene
         \param[in] hit Curve hit info.
         \return Interpolated position in world space for the previous frame.
     */
-    float3 getPrevPosWFromCurve(const CurveHit hit)
-    {
-        return getPrevPosWFromCurve(hit.instanceID, hit.primitiveIndex, hit.barycentrics);
-    }
+    float3 getPrevPosWFromCurve(const CurveHit hit) { return getPrevPosWFromCurve(hit.instanceID, hit.primitiveIndex, hit.barycentrics); }
 
     // SDF grid access
 
@@ -922,10 +924,7 @@ struct Scene
 
     // Custom primitive access
 
-    uint getCustomPrimitiveIndex(const GeometryInstanceID instanceID)
-    {
-        return instanceID.index - customPrimitiveInstanceOffset;
-    }
+    uint getCustomPrimitiveIndex(const GeometryInstanceID instanceID) { return instanceID.index - customPrimitiveInstanceOffset; }
 
     AABB getCustomPrimitiveAABB(const GeometryInstanceID instanceID)
     {
@@ -943,7 +942,11 @@ struct Scene
         \param[in] curvatureEstimator Generic triangle curvature estimator to use.
         \return Estimated curvature.
     */
-    float computeCurvatureGeneric<TCE : ITriangleCurvatureEstimator>(const GeometryInstanceID instanceID, const uint triangleIndex, const TCE curvatureEstimator)
+    float computeCurvatureGeneric<TCE : ITriangleCurvatureEstimator>(
+        const GeometryInstanceID instanceID,
+        const uint triangleIndex,
+        const TCE curvatureEstimator
+    )
     {
         const uint3 vtxIndices = getIndices(instanceID, triangleIndex);
         StaticVertexData vertices[3] = { getVertex(vtxIndices[0]), getVertex(vtxIndices[1]), getVertex(vtxIndices[2]) };
@@ -972,17 +975,24 @@ struct Scene
     */
     float computeCurvatureIsotropic(const GeometryInstanceID instanceID, const uint triangleIndex)
     {
-        TriangleCurvature_Average tce = { };
-        //TriangleCurvature_Max tce = { };          // Over-estimates curvature using max of the 3 edges.
+        TriangleCurvature_Average tce = {};
+        // TriangleCurvature_Max tce = { };          // Over-estimates curvature using max of the 3 edges.
         return computeCurvatureGeneric(instanceID, triangleIndex, tce);
     }
 
-    /** Returns the estimated visible curvature from vertex attributes for ray tracing using the ellipse intersection of a cone with the surface.
+    /** Returns the estimated visible curvature from vertex attributes for ray tracing using the ellipse intersection of a cone with the
+       surface.
         \param[in] instanceID Geometry instance ID of the mesh.
         \param[in] triangleIndex Index of the triangle in the given mesh.
         \return Estimated curvature.
     */
-    float computeCurvatureVisibleEllipse(const GeometryInstanceID instanceID, const uint triangleIndex, const float3 rayDir, const float rayConeWidth, const float rayConeAngle)
+    float computeCurvatureVisibleEllipse(
+        const GeometryInstanceID instanceID,
+        const uint triangleIndex,
+        const float3 rayDir,
+        const float rayConeWidth,
+        const float rayConeAngle
+    )
     {
         TriangleCurvature_EllipseVis tce = { rayDir, rayConeWidth, rayConeAngle };
         return computeCurvatureGeneric(instanceID, triangleIndex, tce);

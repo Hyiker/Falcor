@@ -36,6 +36,7 @@ namespace Falcor::scene1
     {
         kNode,        ///< NodeID, but also for MatrixID for animation.
         kMesh,        ///< MeshID, also curves that tesselate into triangle mesh.
+        kCluster,     ///< MeshID, also curves that tesselate into triangle mesh.
         kCurve,       ///< CurveID
         kCurveOrMesh, ///< Used when the ID in curves is aliased based on tessellation mode.
         kSdfDesc,     ///< The user-facing ID.
@@ -50,6 +51,7 @@ namespace Falcor::scene1
 
     using NodeID = ObjectID<SceneObjectKind, SceneObjectKind::kNode, uint32_t>;
     using MeshID = ObjectID<SceneObjectKind, SceneObjectKind::kMesh, uint32_t>;
+    using ClusterID = ObjectID<SceneObjectKind, SceneObjectKind::kCluster, uint32_t>;
     using CurveID = ObjectID<SceneObjectKind, SceneObjectKind::kCurve, uint32_t>;
     using CurveOrMeshID = ObjectID<SceneObjectKind, SceneObjectKind::kCurveOrMesh, uint32_t>;
     using SdfDescID = ObjectID<SceneObjectKind, SceneObjectKind::kSdfDesc, uint32_t>;

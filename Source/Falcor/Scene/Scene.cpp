@@ -58,6 +58,7 @@
 namespace Falcor
 {
 static_assert(sizeof(MeshDesc) % 16 == 0, "MeshDesc size should be a multiple of 16");
+static_assert(sizeof(ClusterDesc) % 16 == 0, "ClusterDesc size should be a multiple of 16");
 static_assert(sizeof(GeometryInstanceData) == 32, "GeometryInstanceData size should be 32");
 static_assert(sizeof(PackedStaticVertexData) % 16 == 0, "PackedStaticVertexData size should be a multiple of 16");
 
@@ -70,9 +71,11 @@ const size_t kMaxBLASBuildMemory = 1ull << 29;
 const std::string kParameterBlockName = "gScene";
 const std::string kGeometryInstanceBufferName = "geometryInstances";
 const std::string kMeshBufferName = "meshes";
+const std::string kClusterBufferName = "clusters";
 const std::string kIndexBufferName = "indexData";
-const std::string kClusterGUIDBufferName = "clusterGUIDs";
+const std::string kClusterIndexBufferName = "clusterIndexData";
 const std::string kVertexBufferName = "vertices";
+const std::string kClusterVertexBufferName = "clusterVertices";
 const std::string kPrevVertexBufferName = "prevVertices";
 const std::string kProceduralPrimAABBBufferName = "proceduralPrimitiveAABBs";
 const std::string kCurveBufferName = "curves";
@@ -180,10 +183,14 @@ Scene::Scene(ref<Device> pDevice, SceneData&& sceneData) : mpDevice(pDevice)
 
     // Merge all geometry instance lists into one.
     mGeometryInstanceData.reserve(
-        sceneData.meshInstanceData.size() + sceneData.curveInstanceData.size() + sceneData.sdfGridInstances.size()
+        sceneData.meshInstanceData.size() + sceneData.clusterInstanceData.size() + sceneData.curveInstanceData.size() +
+        sceneData.sdfGridInstances.size()
     );
     mGeometryInstanceData.insert(
         std::end(mGeometryInstanceData), std::begin(sceneData.meshInstanceData), std::end(sceneData.meshInstanceData)
+    );
+    mGeometryInstanceData.insert(
+        std::end(mGeometryInstanceData), std::begin(sceneData.clusterInstanceData), std::end(sceneData.clusterInstanceData)
     );
     mGeometryInstanceData.insert(
         std::end(mGeometryInstanceData), std::begin(sceneData.curveInstanceData), std::end(sceneData.curveInstanceData)
@@ -197,7 +204,9 @@ Scene::Scene(ref<Device> pDevice, SceneData&& sceneData) : mpDevice(pDevice)
     mMeshBBs = std::move(sceneData.meshBBs);
     mMeshIdToInstanceIds = std::move(sceneData.meshIdToInstanceIds);
     mMeshGroups = std::move(sceneData.meshGroups);
-    mClusterGUIDs = std::move(sceneData.meshClusterGUIDData);
+
+    mClusterDesc = std::move(sceneData.clusterDesc);
+    mClusterBBs = std::move(sceneData.clusterBBs);
 
     mUseCompressedHitInfo = sceneData.useCompressedHitInfo;
     mHas16BitIndices = sceneData.has16BitIndices;
@@ -235,11 +244,10 @@ Scene::Scene(ref<Device> pDevice, SceneData&& sceneData) : mpDevice(pDevice)
 
     // Set default SDF grid config.
     setSDFGridConfig();
-    logInfo("Scene meshStaticData vertex count:   {}", sceneData.meshStaticData.size());
-    logInfo("Scene mCurveStaticData vertex count: {}", mCurveStaticData.size());
 
     // Create vertex array objects for meshes and curves.
     createMeshVao(sceneData.meshDrawCount, sceneData.meshIndexData, sceneData.meshStaticData, sceneData.meshSkinningData);
+    createClusterVao(sceneData.clusterDrawCount, sceneData.clusterIndexData, sceneData.clusterVertexData);
     createCurveVao(mCurveIndexData, mCurveStaticData);
     createMeshUVTiles(mMeshDesc, sceneData.meshIndexData, sceneData.meshStaticData);
 
@@ -564,6 +572,95 @@ void Scene::createMeshVao(
     mpMeshVao16Bit = Vao::create(Vao::Topology::TriangleList, pLayout, pVBs, pIB, ResourceFormat::R16Uint);
 }
 
+void Scene::createClusterVao(
+    uint32_t drawCount,
+    const std::vector<uint32_t>& indexData,
+    const std::vector<PackedStaticVertexData>& staticData
+)
+{
+    if (drawCount == 0)
+        return;
+
+    // Create the index buffer.
+    size_t ibSize = sizeof(uint32_t) * indexData.size();
+    if (ibSize > std::numeric_limits<uint32_t>::max())
+    {
+        FALCOR_THROW("Index buffer size exceeds 4GB");
+    }
+
+    ref<Buffer> pIB;
+    if (ibSize > 0)
+    {
+        ResourceBindFlags ibBindFlags = ResourceBindFlags::Index | ResourceBindFlags::ShaderResource;
+        pIB = mpDevice->createBuffer(ibSize, ibBindFlags, MemoryType::DeviceLocal, indexData.data());
+    }
+
+    // Create the vertex data structured buffer.
+    const size_t vertexCount = (uint32_t)staticData.size();
+    size_t staticVbSize = sizeof(PackedStaticVertexData) * vertexCount;
+    if (staticVbSize > std::numeric_limits<uint32_t>::max())
+    {
+        FALCOR_THROW("Vertex buffer size exceeds 4GB");
+    }
+
+    ref<Buffer> pStaticBuffer;
+    if (vertexCount > 0)
+    {
+        ResourceBindFlags vbBindFlags = ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess | ResourceBindFlags::Vertex;
+        pStaticBuffer = mpDevice->createStructuredBuffer(
+            sizeof(PackedStaticVertexData), (uint32_t)vertexCount, vbBindFlags, MemoryType::DeviceLocal, staticData.data(), false
+        );
+    }
+
+    Vao::BufferVec pVBs(kVertexBufferCount);
+    pVBs[kStaticDataBufferIndex] = pStaticBuffer;
+
+    // Create the draw ID buffer.
+    // This is only needed when rasterizing meshes in the scene.
+    ResourceFormat drawIDFormat = ResourceFormat::R32Uint;
+
+    ref<Buffer> pDrawIDBuffer;
+
+    std::vector<uint32_t> drawIDs(drawCount);
+    for (uint32_t i = 0; i < drawCount; i++)
+        drawIDs[i] = i;
+    pDrawIDBuffer =
+        mpDevice->createBuffer(drawCount * sizeof(uint32_t), ResourceBindFlags::Vertex, MemoryType::DeviceLocal, drawIDs.data());
+
+    FALCOR_ASSERT(pDrawIDBuffer);
+    pVBs[kDrawIdBufferIndex] = pDrawIDBuffer;
+
+    // Create vertex layout.
+    // The layout only initializes the vertex data and draw ID layout. The skinning data doesn't get passed into the vertex shader.
+    ref<VertexLayout> pLayout = VertexLayout::create();
+
+    // Add the packed static vertex data layout.
+    ref<VertexBufferLayout> pStaticLayout = VertexBufferLayout::create();
+    pStaticLayout->addElement(
+        VERTEX_POSITION_NAME, offsetof(PackedStaticVertexData, position), ResourceFormat::RGB32Float, 1, VERTEX_POSITION_LOC
+    );
+    pStaticLayout->addElement(
+        VERTEX_PACKED_NORMAL_TANGENT_CURVE_RADIUS_NAME,
+        offsetof(PackedStaticVertexData, packedNormalTangentCurveRadius),
+        ResourceFormat::RGB32Float,
+        1,
+        VERTEX_PACKED_NORMAL_TANGENT_CURVE_RADIUS_LOC
+    );
+    pStaticLayout->addElement(
+        VERTEX_TEXCOORD_NAME, offsetof(PackedStaticVertexData, texCrd), ResourceFormat::RG32Float, 1, VERTEX_TEXCOORD_LOC
+    );
+    pLayout->addBufferLayout(kStaticDataBufferIndex, pStaticLayout);
+
+    // Add the draw ID layout.
+    ref<VertexBufferLayout> pInstLayout = VertexBufferLayout::create();
+    pInstLayout->addElement(INSTANCE_DRAW_ID_NAME, 0, drawIDFormat, 1, INSTANCE_DRAW_ID_LOC);
+    pInstLayout->setInputClass(VertexBufferLayout::InputClass::PerInstanceData, 1);
+    pLayout->addBufferLayout(kDrawIdBufferIndex, pInstLayout);
+
+    // Create the VAO objects.
+    mpClusterVao = Vao::create(Vao::Topology::TriangleList, pLayout, pVBs, pIB, ResourceFormat::R32Uint);
+}
+
 void Scene::createCurveVao(const std::vector<uint32_t>& indexData, const std::vector<StaticCurveVertexData>& staticData)
 {
     if (indexData.empty() || staticData.empty())
@@ -853,6 +950,19 @@ void Scene::createParameterBlock()
         mpMeshesBuffer->setName("Scene::mpMeshesBuffer");
     }
 
+    if (!mClusterDesc.empty() && (!mpClustersBuffer || mpClustersBuffer->getElementCount() < mClusterDesc.size()))
+    {
+        mpClustersBuffer = mpDevice->createStructuredBuffer(
+            var[kClusterBufferName],
+            (uint32_t)mClusterDesc.size(),
+            ResourceBindFlags::ShaderResource,
+            MemoryType::DeviceLocal,
+            nullptr,
+            false
+        );
+        mpClustersBuffer->setName("Scene::mpClustersBuffer");
+    }
+
     if (!mCurveDesc.empty() && (!mpCurvesBuffer || mpCurvesBuffer->getElementCount() < mCurveDesc.size()))
     {
         mpCurvesBuffer = mpDevice->createStructuredBuffer(
@@ -881,19 +991,6 @@ void Scene::createParameterBlock()
         );
         mpGridVolumesBuffer->setName("Scene::mpGridVolumesBuffer");
     }
-
-    if (!mClusterGUIDs.empty() && (!mpClusterGUIDsBuffer || mpClusterGUIDsBuffer->getElementCount() < mClusterGUIDs.size()))
-    {
-        mpClusterGUIDsBuffer = mpDevice->createStructuredBuffer(
-            var[kClusterGUIDBufferName],
-            (uint32_t)mClusterGUIDs.size(),
-            ResourceBindFlags::ShaderResource,
-            MemoryType::DeviceLocal,
-            nullptr,
-            false
-        );
-        mpClusterGUIDsBuffer->setName("Scene::mpClusterGUIDsBuffer");
-    }
 }
 
 void Scene::bindParameterBlock()
@@ -908,7 +1005,6 @@ void Scene::bindParameterBlock()
     bindSDFGrids();
     bindLights();
     bindSelectedCamera();
-    bindNaniteData();
 
     mpMaterials->bindShaderData(var[kMaterialsBlockName]);
 }
@@ -917,6 +1013,8 @@ void Scene::uploadGeometry()
 {
     if (!mMeshDesc.empty())
         mpMeshesBuffer->setBlob(mMeshDesc.data(), 0, sizeof(MeshDesc) * mMeshDesc.size());
+    if (!mClusterDesc.empty())
+        mpClustersBuffer->setBlob(mClusterDesc.data(), 0, sizeof(ClusterDesc) * mClusterDesc.size());
     if (!mCurveDesc.empty())
         mpCurvesBuffer->setBlob(mCurveDesc.data(), 0, sizeof(CurveDesc) * mCurveDesc.size());
 }
@@ -926,6 +1024,7 @@ void Scene::bindGeometry()
     auto var = mpSceneBlock->getRootVar();
 
     var[kMeshBufferName] = mpMeshesBuffer;
+    var[kClusterBufferName] = mpClustersBuffer;
     var[kCurveBufferName] = mpCurvesBuffer;
     var[kGeometryInstanceBufferName] = mpGeometryInstancesBuffer;
 
@@ -940,26 +1039,18 @@ void Scene::bindGeometry()
         var[kPrevVertexBufferName] = mpAnimationController->getPrevVertexData(); // Can be nullptr
     }
 
+    if (mpClusterVao != nullptr)
+    {
+        var[kClusterIndexBufferName] = mpClusterVao->getIndexBuffer();
+        var[kClusterVertexBufferName] = mpClusterVao->getVertexBuffer(Scene::kStaticDataBufferIndex);
+    }
+
     if (mpCurveVao != nullptr)
     {
         var[kCurveIndexBufferName] = mpCurveVao->getIndexBuffer();
         var[kCurveVertexBufferName] = mpCurveVao->getVertexBuffer(Scene::kStaticDataBufferIndex);
         var[kPrevCurveVertexBufferName] = mpAnimationController->getPrevCurveVertexData();
     }
-}
-
-void Scene::uploadNaniteData()
-{
-    if (!mClusterGUIDs.empty())
-    {
-        mpClusterGUIDsBuffer->setBlob(mClusterGUIDs.data(), 0, sizeof(uint64_t) * mClusterGUIDs.size());
-    }
-}
-
-void Scene::bindNaniteData()
-{
-    auto var = mpSceneBlock->getRootVar();
-    var[kClusterGUIDBufferName] = mpClusterGUIDsBuffer;
 }
 
 void Scene::bindSDFGrids()
@@ -993,8 +1084,16 @@ void Scene::updateBounds()
         case GeometryType::TriangleMesh:
         case GeometryType::DisplacedTriangleMesh:
         {
-            const AABB& meshBB = mMeshBBs[inst.geometryID];
-            mSceneBB |= meshBB.transform(transform);
+            if (inst.isNaniteMesh())
+            {
+                const AABB& clusterBB = mClusterBBs[inst.geometryID];
+                mSceneBB |= clusterBB.transform(transform);
+            }
+            else
+            {
+                const AABB& meshBB = mMeshBBs[inst.geometryID];
+                mSceneBB |= meshBB.transform(transform);
+            }
             break;
         }
         case GeometryType::Curve:
@@ -1052,7 +1151,8 @@ void Scene::updateGeometryInstances(bool forceUpdate)
             FALCOR_ASSERT(inst.globalMatrixID < globalMatrices.size());
             const float4x4& transform = globalMatrices[inst.globalMatrixID];
             bool isTransformFlipped = doesTransformFlip(transform);
-            bool isObjectFrontFaceCW = getMesh(MeshID::fromSlang(inst.geometryID)).isFrontFaceCW();
+            bool isObjectFrontFaceCW = inst.isNaniteMesh() ? getCluster(ClusterID::fromSlang(inst.geometryID)).isFrontFaceCW()
+                                                           : getMesh(MeshID::fromSlang(inst.geometryID)).isFrontFaceCW();
             bool isWorldFrontFaceCW = isObjectFrontFaceCW ^ isTransformFlipped;
 
             if (isTransformFlipped)
@@ -1388,7 +1488,7 @@ void Scene::bindProceduralPrimitives()
 void Scene::updateGeometryTypes()
 {
     mGeometryTypes = GeometryTypeFlags(0);
-    if (getMeshCount() > 0)
+    if (getMeshCount() > 0 || getClusterCount() > 0)
         mGeometryTypes |= GeometryTypeFlags::TriangleMesh;
     auto hasDisplaced = std::any_of(mMeshDesc.begin(), mMeshDesc.end(), [](const auto& mesh) { return mesh.isDisplaced(); });
     if (hasDisplaced)
@@ -1452,7 +1552,6 @@ void Scene::finalize()
     updateGridVolumes(true);
     updateEnvMap(true);
     uploadGeometry();
-    uploadNaniteData();
     bindParameterBlock(); // Bind final data after initialization is complete.
 
     // Update stats and UI data.
@@ -1498,6 +1597,7 @@ void Scene::updateGeometryStats()
     s.uniqueTriangleCount = 0;
     s.instancedVertexCount = 0;
     s.instancedTriangleCount = 0;
+    s.clusterCount = getClusterCount();
     s.curveCount = getCurveCount();
     s.curveInstanceCount = 0;
     s.uniqueCurvePointCount = 0;
@@ -1518,14 +1618,28 @@ void Scene::updateGeometryStats()
         case GeometryType::TriangleMesh:
         case GeometryType::DisplacedTriangleMesh:
         {
-            s.meshInstanceCount++;
-            const auto& mesh = getMesh(MeshID::fromSlang(instance.geometryID));
-            s.instancedVertexCount += mesh.vertexCount;
-            s.instancedTriangleCount += mesh.getTriangleCount();
+            if (instance.isNaniteMesh())
+            {
+                s.clusterInstanceCount++;
+                const auto& cluster = getCluster(ClusterID::fromSlang(instance.geometryID));
+                s.instancedVertexCount += cluster.vertexCount;
+                s.instancedTriangleCount += cluster.getTriangleCount();
 
-            auto pMaterial = getMaterial(MaterialID::fromSlang(instance.materialID));
-            if (pMaterial->isOpaque())
-                s.meshInstanceOpaqueCount++;
+                auto pMaterial = getMaterial(MaterialID::fromSlang(instance.materialID));
+                if (pMaterial->isOpaque())
+                    s.clusterInstanceOpaqueCount++;
+            }
+            else
+            {
+                s.meshInstanceCount++;
+                const auto& mesh = getMesh(MeshID::fromSlang(instance.geometryID));
+                s.instancedVertexCount += mesh.vertexCount;
+                s.instancedTriangleCount += mesh.getTriangleCount();
+
+                auto pMaterial = getMaterial(MaterialID::fromSlang(instance.materialID));
+                if (pMaterial->isOpaque())
+                    s.meshInstanceOpaqueCount++;
+            }
             break;
         }
         case GeometryType::Curve:
@@ -1561,6 +1675,8 @@ void Scene::updateGeometryStats()
     // Calculate memory usage.
     s.indexMemoryInBytes = 0;
     s.vertexMemoryInBytes = 0;
+    s.clusterIndexMemoryInBytes = 0;
+    s.clusterVertexMemoryInBytes = 0;
     s.geometryMemoryInBytes = 0;
     s.animationMemoryInBytes = 0;
 
@@ -1573,6 +1689,15 @@ void Scene::updateGeometryStats()
         s.indexMemoryInBytes += pIB ? pIB->getSize() : 0;
         s.vertexMemoryInBytes += pVB ? pVB->getSize() : 0;
         s.geometryMemoryInBytes += pDrawID ? pDrawID->getSize() : 0;
+    }
+
+    if (mpClusterVao)
+    {
+        const auto& pClusterIB = mpClusterVao->getIndexBuffer();
+        const auto& pClusterVB = mpClusterVao->getVertexBuffer(kStaticDataBufferIndex);
+
+        s.clusterIndexMemoryInBytes += pClusterIB ? pClusterIB->getSize() : 0;
+        s.clusterVertexMemoryInBytes += pClusterVB ? pClusterVB->getSize() : 0;
     }
 
     s.curveIndexMemoryInBytes = 0;
@@ -1596,11 +1721,10 @@ void Scene::updateGeometryStats()
 
     s.geometryMemoryInBytes += mpGeometryInstancesBuffer ? mpGeometryInstancesBuffer->getSize() : 0;
     s.geometryMemoryInBytes += mpMeshesBuffer ? mpMeshesBuffer->getSize() : 0;
+    s.geometryMemoryInBytes += mpClustersBuffer ? mpClustersBuffer->getSize() : 0;
     s.geometryMemoryInBytes += mpCurvesBuffer ? mpCurvesBuffer->getSize() : 0;
     s.geometryMemoryInBytes += mpCustomPrimitivesBuffer ? mpCustomPrimitivesBuffer->getSize() : 0;
     s.geometryMemoryInBytes += mpRtAABBBuffer ? mpRtAABBBuffer->getSize() : 0;
-    // TODO: Statistics for Nanite related data
-    s.geometryMemoryInBytes += mpClusterGUIDsBuffer ? mpClusterGUIDsBuffer->getSize() : 0;
 
     for (const auto& draw : mDrawArgs)
     {
@@ -2396,6 +2520,7 @@ void Scene::renderUI(Gui::Widgets& widget)
             << "  Mesh instance count (total): " << s.meshInstanceCount << std::endl
             << "  Mesh instance count (opaque): " << s.meshInstanceOpaqueCount << std::endl
             << "  Mesh instance count (non-opaque): " << (s.meshInstanceCount - s.meshInstanceOpaqueCount) << std::endl
+            << "  Cluster instance count" << s.clusterInstanceCount << std::endl
             << "  Transform matrix count: " << s.transformCount << std::endl
             << "  Unique triangle count: " << s.uniqueTriangleCount << std::endl
             << "  Unique vertex count: " << s.uniqueVertexCount << std::endl
@@ -2664,10 +2789,11 @@ void Scene::selectViewpoint(uint32_t index)
 
 uint32_t Scene::getGeometryCount() const
 {
-    // The BLASes currently hold the geometries in the order: meshes, curves, SDF grids, custom primitives.
+    // The BLASes currently hold the geometries in the order: meshes, clusters, curves, SDF grids, custom primitives.
     // We calculate the total number of geometries as the sum of the respective kind.
 
-    size_t totalGeometries = mMeshDesc.size() + mCurveDesc.size() + mCustomPrimitiveDesc.size() + getSDFGridGeometryCount();
+    size_t totalGeometries =
+        mMeshDesc.size() + mClusterDesc.size() + mCurveDesc.size() + mCustomPrimitiveDesc.size() + getSDFGridGeometryCount();
     FALCOR_ASSERT_LT(totalGeometries, std::numeric_limits<uint32_t>::max());
     return (uint32_t)totalGeometries;
 }
@@ -2741,11 +2867,13 @@ Scene::GeometryType Scene::getGeometryType(GlobalGeometryID geometryID) const
         else
             return GeometryType::TriangleMesh;
     }
-    else if (geometryID.get() < mMeshDesc.size() + mCurveDesc.size())
+    else if (geometryID.get() < mMeshDesc.size() + mClusterDesc.size())
+        return GeometryType::TriangleMesh;
+    else if (geometryID.get() < mMeshDesc.size() + mClusterDesc.size() + mCurveDesc.size())
         return GeometryType::Curve;
-    else if (geometryID.get() < mMeshDesc.size() + mCurveDesc.size() + mSDFGridDesc.size())
+    else if (geometryID.get() < mMeshDesc.size() + mClusterDesc.size() + mCurveDesc.size() + mSDFGridDesc.size())
         return GeometryType::SDFGrid;
-    else if (geometryID.get() < mMeshDesc.size() + mCurveDesc.size() + mSDFGridDesc.size() + mCustomPrimitiveDesc.size())
+    else if (geometryID.get() < mMeshDesc.size() + mClusterDesc.size() + mCurveDesc.size() + mSDFGridDesc.size() + mCustomPrimitiveDesc.size())
         return GeometryType::Custom;
     else
         FALCOR_THROW("'geometryID' is invalid.");
@@ -2805,6 +2933,12 @@ ref<Material> Scene::getGeometryMaterial(GlobalGeometryID geometryID) const
     }
     geometryIdx -= (uint32_t)mMeshDesc.size();
 
+    if (geometryIdx < mClusterDesc.size())
+    {
+        return mpMaterials->getMaterial(MaterialID::fromSlang(mClusterDesc[geometryIdx].materialID));
+    }
+    geometryIdx -= (uint32_t)mClusterDesc.size();
+
     if (geometryIdx < mCurveDesc.size())
     {
         return mpMaterials->getMaterial(MaterialID::fromSlang(mCurveDesc[geometryIdx].materialID));
@@ -2833,7 +2967,7 @@ uint32_t Scene::getCustomPrimitiveIndex(GlobalGeometryID geometryID) const
         FALCOR_THROW("'geometryID' ({}) does not refer to a custom primitive.", geometryID);
     }
 
-    size_t customPrimitiveOffset = mMeshDesc.size() + mCurveDesc.size() + mSDFGridDesc.size();
+    size_t customPrimitiveOffset = mMeshDesc.size() + mClusterDesc.size() + mCurveDesc.size() + mSDFGridDesc.size();
     FALCOR_ASSERT(geometryID.get() >= (uint32_t)customPrimitiveOffset && geometryID.get() < getGeometryCount());
     return geometryID.get() - (uint32_t)customPrimitiveOffset;
 }
@@ -2982,14 +3116,15 @@ void Scene::createDrawList()
         }
     };
 
-    if (hasIndexBuffer())
+    if (hasIndexBuffer() || hasNaniteMeshes())
     {
         std::vector<DrawIndexedArguments> drawClockwiseMeshes[2], drawCounterClockwiseMeshes[2];
 
         uint32_t instanceID = 0;
         for (const auto& instance : mGeometryInstanceData)
         {
-            if (instance.getType() != GeometryType::TriangleMesh)
+            // ignore nanite meshes by now
+            if (instance.getType() != GeometryType::TriangleMesh || instance.isNaniteMesh())
                 continue;
 
             const auto& mesh = mMeshDesc[instance.geometryID];
@@ -3045,10 +3180,11 @@ void Scene::initGeomDesc(RenderContext* pRenderContext)
 
     // First compute total number of BLASes to build:
     // - Triangle meshes have been grouped beforehand and we build one BLAS per mesh group.
+    // - Clusters LODs are chosen by heuristic, build one BLAS for each cluster.(TODO)
     // - Curves and procedural primitives are currently placed in a single BLAS each, if they exist.
     // - SDF grids are placed in individual BLASes.
-    const uint32_t totalBlasCount =
-        (uint32_t)mMeshGroups.size() + (mCurveDesc.empty() ? 0 : 1) + getSDFGridGeometryCount() + (mCustomPrimitiveDesc.empty() ? 0 : 1);
+    const uint32_t totalBlasCount = (uint32_t)mMeshGroups.size() + (uint32_t)mClusterDesc.size() + (mCurveDesc.empty() ? 0 : 1) +
+                                    getSDFGridGeometryCount() + (mCustomPrimitiveDesc.empty() ? 0 : 1);
 
     mBlasData.clear();
     mBlasData.resize(totalBlasCount);
@@ -3195,6 +3331,61 @@ void Scene::initGeomDesc(RenderContext* pRenderContext)
         }
     }
 
+    size_t blasDataIndex = mMeshGroups.size();
+
+    if (!mClusterDesc.empty())
+    {
+        FALCOR_ASSERT(mpClusterVao);
+        const ref<VertexBufferLayout>& pVbLayout = mpClusterVao->getVertexLayout()->getBufferLayout(kStaticDataBufferIndex);
+        const ref<Buffer>& pVb = mpClusterVao->getVertexBuffer(kStaticDataBufferIndex);
+        const ref<Buffer>& pIb = mpClusterVao->getIndexBuffer();
+
+        for (size_t i = 0; i < mClusterDesc.size(); i++)
+        {
+            const auto& clusterDesc = mClusterDesc[i];
+            auto& blas = mBlasData[blasDataIndex++];
+            auto& geomDescs = blas.geomDescs;
+            geomDescs.resize(1);
+            blas.hasProceduralPrimitives = false;
+            blas.hasDynamicCurve = false;
+            blas.hasDynamicMesh = false;
+
+            // Track what types of triangle winding exist in the final BLAS.
+            // The SceneBuilder should have ensured winding is consistent, but keeping the check here as a safeguard.
+            uint32_t triangleWindings = 0; // bit 0 indicates CW, bit 1 CCW.
+
+            bool frontFaceCW = clusterDesc.isFrontFaceCW();
+
+            RtGeometryDesc& desc = geomDescs[0];
+
+            desc.type = RtGeometryType::Triangles;
+            desc.content.triangles.transform3x4 = 0; // The default is no transform
+
+            triangleWindings |= frontFaceCW ? 1 : 2;
+
+            // If this is an opaque cluster, set the opaque flag
+            auto pMaterial = mpMaterials->getMaterial(MaterialID::fromSlang(clusterDesc.materialID));
+            desc.flags = pMaterial->isOpaque() ? RtGeometryFlags::Opaque : RtGeometryFlags::None;
+
+            // Set the position data
+            desc.content.triangles.vertexData = pVb->getGpuAddress() + (clusterDesc.vbOffset * pVbLayout->getStride());
+            desc.content.triangles.vertexStride = pVbLayout->getStride();
+            desc.content.triangles.vertexCount = clusterDesc.vertexCount;
+            desc.content.triangles.vertexFormat = pVbLayout->getElementFormat(0);
+
+            // The global index data is stored in a dword array.
+            ResourceFormat ibFormat = ResourceFormat::R32Uint;
+            desc.content.triangles.indexData = pIb->getGpuAddress() + clusterDesc.ibOffset * sizeof(uint32_t);
+            desc.content.triangles.indexCount = clusterDesc.indexCount;
+            desc.content.triangles.indexFormat = ibFormat;
+
+            if (triangleWindings == 0x3)
+            {
+                logWarning("Cluster group {} has mixed triangle winding. Back/front face culling won't work correctly.", i);
+            }
+        }
+    }
+
     // Procedural primitives other than displaced triangle meshes and SDF grids are placed in two BLASes at the end.
     // The geometries in these BLASes are using the following layout:
     //
@@ -3221,7 +3412,6 @@ void Scene::initGeomDesc(RenderContext* pRenderContext)
     //
     // Each procedural primitive indexes a range of AABBs in a global AABB buffer.
     //
-    size_t blasDataIndex = mMeshGroups.size();
     uint64_t bbAddressOffset = 0;
     if (!mCurveDesc.empty())
     {
@@ -3471,6 +3661,14 @@ void Scene::buildBlas(RenderContext* pRenderContext)
         pRenderContext->resourceBarrier(pVb.get(), Resource::State::NonPixelShader);
         if (pIb)
             pRenderContext->resourceBarrier(pIb.get(), Resource::State::NonPixelShader);
+    }
+
+    if (mpClusterVao)
+    {
+        const ref<Buffer>& pVb = mpClusterVao->getVertexBuffer(kStaticDataBufferIndex);
+        const ref<Buffer>& pIb = mpClusterVao->getIndexBuffer();
+        pRenderContext->resourceBarrier(pVb.get(), Resource::State::NonPixelShader);
+        pRenderContext->resourceBarrier(pIb.get(), Resource::State::NonPixelShader);
     }
 
     if (mpCurveVao)
@@ -3879,11 +4077,49 @@ void Scene::fillInstanceDesc(std::vector<RtInstanceDesc>& instanceDescs, uint32_
         }
     }
 
-    uint32_t totalBlasCount =
-        (uint32_t)mMeshGroups.size() + (mCurveDesc.empty() ? 0 : 1) + getSDFGridGeometryCount() + (mCustomPrimitiveDesc.empty() ? 0 : 1);
+    uint32_t totalBlasCount = (uint32_t)mMeshGroups.size() + (uint32_t)mClusterDesc.size() + (mCurveDesc.empty() ? 0 : 1) +
+                              getSDFGridGeometryCount() + (mCustomPrimitiveDesc.empty() ? 0 : 1);
     FALCOR_ASSERT((uint32_t)mBlasData.size() == totalBlasCount);
-
     size_t blasDataIndex = mMeshGroups.size();
+
+    for (size_t i = 0; i < mClusterDesc.size(); i++)
+    {
+        const auto& clusterDesc = mClusterDesc[i];
+        const auto& blasData = mBlasData[blasDataIndex++];
+
+        FALCOR_ASSERT(blasData.blasGroupIndex < mBlasGroups.size());
+        const auto& pBlas = mBlasGroups[blasData.blasGroupIndex].pBlas;
+        FALCOR_ASSERT(pBlas);
+
+        RtInstanceDesc desc = {};
+        desc.accelerationStructure = pBlas->getGpuAddress() + blasData.blasByteOffset;
+        desc.instanceMask = 0xFF;
+        desc.instanceContributionToHitGroupIndex = 0;
+
+        instanceContributionToHitGroupIndex += rayTypeCount;
+
+        const bool frontFaceCW = clusterDesc.isFrontFaceCW();
+
+        if (frontFaceCW)
+            desc.flags = desc.flags | RtGeometryInstanceFlags::TriangleFrontCounterClockwise;
+
+        size_t instanceCount = 1;
+
+        for (size_t instanceIdx = 0; instanceIdx < instanceCount; instanceIdx++)
+        {
+            desc.instanceID = instanceID++;
+
+            float4x4 transform4x4 = float4x4::identity();
+            std::memcpy(desc.transform, &transform4x4, sizeof(desc.transform));
+
+            // Verify that instance data has the correct instanceIndex and geometryIndex.
+
+            FALCOR_ASSERT((uint32_t)instanceDescs.size() == mGeometryInstanceData[desc.instanceID].instanceIndex);
+            FALCOR_ASSERT(0 == mGeometryInstanceData[desc.instanceID].geometryIndex);
+        }
+        instanceDescs.push_back(desc);
+    }
+
     // One instance for curves.
     if (!mCurveDesc.empty())
     {

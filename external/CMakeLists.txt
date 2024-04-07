@@ -534,9 +534,8 @@ set(PTEX_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/ptex/src/ptex" PARENT_SCOPE)
 
 # METIS
 message(STATUS "Configure libmetis")
-
 set(METIS_INSTALL OFF)
-set(METIS_LIBRARY_TYPE STATIC)
+set(MESHOPT_BUILD_SHARED_LIBS OFF)
 add_subdirectory(metis)
 
 # Mesh optimizer

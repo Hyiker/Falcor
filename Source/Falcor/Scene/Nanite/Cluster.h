@@ -20,18 +20,19 @@ public:
      *
      * @param vertices The global vertices buffer.
      * @param convertIndex The index conversion function for 16-bit index conversion.
+     * @param materialID The mesh materialID.
      * @param partitioner The graph partitioner.
      * @param adjacency The edge adjacency.
      * @param triangleRange The range of the triangles.
-     * @param clusterCallback The callback function for cluster creation, triggered for every triangle index.
      */
     Cluster(
         const fstd::span<const PackedStaticVertexData>& vertices,
         std::function<uint32_t(uint32_t)> convertIndex,
+        MaterialID materialID,
         const GraphPartitioner& partitioner,
         const EdgeAdjacency& adjacency,
         const GraphPartitioner::Range& triangleRange,
-        std::function<void(uint32_t, uint64_t)> clusterCallback
+        bool isFrontFaceCW
     );
 
     /**
@@ -79,7 +80,9 @@ public:
 
     auto getExternalEdgesCount() const { return mExternalEdgeCount; }
 
-    auto getIndicesSize() const { return mIndices.size(); }
+    uint32_t getIndexCount() const { return mIndices.size(); }
+
+    uint32_t getVertexCount() const { return mVertices.size(); }
 
     const auto& getBounds() const { return mBoundingBox; }
 
@@ -87,8 +90,15 @@ public:
 
     void saveToFile(const std::filesystem::path& p) const;
 
+    MaterialID materialID;
+    std::set<NodeID> instances;
+
+    // Mesh flags
+    bool isFrontFaceCW = false;
 private:
     uint64_t mGUID = 0ull; ///< Global unique cluster id
+
+
     // Mesh data
     std::vector<PackedStaticVertexData> mVertices;
     std::vector<uint32_t> mIndices;
@@ -108,6 +118,7 @@ private:
     uint32_t mGroupPartIndex = std::numeric_limits<uint32_t>().max();
 
     friend class NaniteDataBuilder;
+    friend class SceneBuilder;
 };
 
 struct ClusterGroup

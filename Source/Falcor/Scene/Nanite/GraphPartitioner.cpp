@@ -2,7 +2,7 @@
 #include "GraphPartitioner.h"
 #include "Utils/Math/FalcorMath.h"
 #include "Utils/Algorithm/RadixSort.h"
-#include "metis.h"
+#include <metis.h>
 namespace Falcor
 {
 

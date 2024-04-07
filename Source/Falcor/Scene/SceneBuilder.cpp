@@ -377,6 +377,10 @@ ref<Scene> SceneBuilder::getScene()
     unifyTriangleWinding();
     optimizeSceneGraph();
     calculateMeshBoundingBoxes();
+
+    // Prepare Nanite data. Static meshes are removed after cluster creation.
+    createNaniteData();
+
     createMeshGroups();
     optimizeGeometry();
     sortMeshes();
@@ -400,12 +404,10 @@ ref<Scene> SceneBuilder::getScene()
     createCurveData();
     calculateCurveBoundingBoxes();
 
-    // Prepare Nanite data.
-    createNaniteData();
-
     // Create instance data.
     uint32_t tlasInstanceIndex = 0;
     createMeshInstanceData(tlasInstanceIndex);
+    createClusterInstanceData(tlasInstanceIndex);
     createCurveInstanceData(tlasInstanceIndex);
     // Adjust instance indices of SDF grid instances.
     for (auto& sdfInstanceData : mSceneData.sdfGridInstances)
@@ -2956,6 +2958,47 @@ void SceneBuilder::createMeshInstanceData(uint32_t& tlasInstanceIndex)
     mSceneData.meshDrawCount = (uint32_t)drawCount;
 }
 
+void SceneBuilder::createClusterInstanceData(uint32_t& tlasInstanceIndex)
+{
+    // Setup all cluster instances.
+    //
+    // Cluster instances are added in the same order as the clusters in the cluster descriptors.
+    // For ray tracing, one BLAS per cluster is created and the mesh instances
+    // can therefore be directly indexed by [InstanceID()].
+
+    FALCOR_ASSERT(mSceneData.clusterInstanceData.empty());
+
+    auto& instanceData = mSceneData.clusterInstanceData;
+    size_t drawCount = 0;
+
+    for (uint32_t clusterID = 0; clusterID < mSceneData.clusterDesc.size(); clusterID++)
+    {
+        const auto& cluster = mSceneData.clusterDesc[clusterID];
+        size_t instanceCount = 1;
+
+        FALCOR_ASSERT(instanceCount > 0);
+        uint32_t blasGeometryIndex = 0;
+
+        GeometryType geomType = GeometryType::TriangleMesh;
+
+        GeometryInstanceData instance(geomType);
+        instance.globalMatrixID = 0;
+        instance.materialID = cluster.materialID;
+        instance.geometryID = clusterID;
+        instance.vbOffset = cluster.vbOffset;
+        instance.ibOffset = cluster.ibOffset;
+        instance.flags |= (uint32_t)GeometryInstanceFlags::IsNaniteMesh;
+        instance.instanceIndex = tlasInstanceIndex++;
+        instance.geometryIndex = 0;
+        instanceData.push_back(instance);
+
+        drawCount += instanceCount;
+    }
+
+    FALCOR_ASSERT(drawCount <= std::numeric_limits<uint32_t>::max());
+    mSceneData.clusterDrawCount = (uint32_t)drawCount;
+}
+
 void SceneBuilder::createCurveData()
 {
     auto& curveData = mSceneData.curveDesc;
@@ -3059,11 +3102,47 @@ void SceneBuilder::createNaniteData()
     {
         mpNaniteDataBuilder = std::make_unique<NaniteDataBuilder>();
     }
-    logInfo("Building Nanite data for {} mesh(es).", mSceneData.meshDesc.size());
+    logInfo("Building Nanite data for {} mesh(es).", mMeshes.size());
 
-    mpNaniteDataBuilder->buildNaniteData(mSceneData.meshStaticData, mSceneData.meshIndexData, mMeshes);
+    mpNaniteDataBuilder->buildNaniteData(mMeshes);
 
-    mSceneData.meshClusterGUIDData = mpNaniteDataBuilder->getClusterGUIDs();
+    auto& clusters = mpNaniteDataBuilder->mClusters;
+    // Create cluster global buffers
+    auto& indexData = mSceneData.clusterIndexData;
+    auto& vertexData = mSceneData.clusterVertexData;
+    auto& clusterDescs = mSceneData.clusterDesc;
+    auto& clusterBBs = mSceneData.clusterBBs;
+    uint32_t indexOffset = 0;
+    uint32_t vertexOffset = 0;
+
+    clusterDescs.resize(clusters.size());
+    clusterBBs.resize(clusters.size());
+    for (uint32_t i = 0; i < clusters.size(); i++)
+    {
+        // move buffers
+        const auto& cluster = clusters[i];
+        uint32_t indexCount = cluster.getIndexCount();
+        uint32_t vertexCount = cluster.getVertexCount();
+        indexData.insert(
+            indexData.end(), std::make_move_iterator(cluster.mIndices.begin()), std::make_move_iterator(cluster.mIndices.end())
+        );
+        vertexData.insert(
+            vertexData.end(), std::make_move_iterator(cluster.mVertices.begin()), std::make_move_iterator(cluster.mVertices.end())
+        );
+
+        clusterDescs[i].GUID = cluster.getGUID();
+        clusterDescs[i].ibOffset = indexOffset;
+        clusterDescs[i].vbOffset = vertexOffset;
+        clusterDescs[i].indexCount = indexCount;
+        clusterDescs[i].vertexCount = vertexCount;
+        clusterDescs[i].materialID = cluster.materialID.getSlang();
+        clusterDescs[i].flags |= cluster.isFrontFaceCW ? (uint32_t)MeshFlags::IsFrontFaceCW : 0;
+
+        clusterBBs[i] = cluster.getBounds();
+
+        indexOffset += indexCount;
+        vertexOffset += vertexCount;
+    }
 }
 
 FALCOR_SCRIPT_BINDING(SceneBuilder)

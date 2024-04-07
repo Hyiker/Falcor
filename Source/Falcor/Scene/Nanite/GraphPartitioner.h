@@ -1,7 +1,7 @@
 #pragma once
 #include "Utils/Algorithm/FastDisjointSet.h"
 #include <fstd/span.h>
-#include "metis.h"
+#include <metis.h>
 namespace Falcor
 {
 /**

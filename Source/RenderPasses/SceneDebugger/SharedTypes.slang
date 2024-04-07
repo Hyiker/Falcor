@@ -138,6 +138,9 @@ struct PixelData
     uint materialID;
     uint geometryID;
     uint blasID;
+
+    // Nanite
+    uint naniteFlag;
     uint64_t clusterID;
 
     // ShadingData

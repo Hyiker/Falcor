@@ -42,6 +42,7 @@
 #include "Volume/GridVolume.h"
 #include "Volume/Grid.h"
 #include "SDFs/SDFGrid.h"
+#include "Scene/Nanite/Cluster.h"
 
 #include "Core/Macros.h"
 #include "Core/Object.h"
@@ -338,7 +339,14 @@ namespace Falcor
             std::vector<uint32_t> meshIndexData;                    ///< Vertex indices for all meshes in either 32-bit or 16-bit format packed tightly, decided per mesh.
             std::vector<PackedStaticVertexData> meshStaticData;     ///< Vertex attributes for all meshes in packed format.
             std::vector<SkinningVertexData> meshSkinningData;       ///< Additional vertex attributes for skinned meshes.
-            std::vector<uint64_t> meshClusterGUIDData;              ///< Debugging data for Nanite cluster GUID(per triangle)
+
+            // Cluster data
+            std::vector<ClusterDesc> clusterDesc;                   ///< List of cluster descriptors.
+            std::vector<AABB> clusterBBs;                           ///< List of cluster bounding boxes in object space.
+            std::vector<GeometryInstanceData> clusterInstanceData;  ///< List of cluster instances.
+            std::vector<uint32_t> clusterIndexData;                 ///< Vertex indices for all clusters, 32-bit format packed tightly.(TODO: use 8-bit index)
+            std::vector<PackedStaticVertexData> clusterVertexData;  ///< Vertex attributes for all clusters in packed format.
+            uint32_t clusterDrawCount;                              ///< Number of clusters to draw.
 
             // Curve data
             std::vector<CurveDesc> curveDesc;                       ///< List of curve descriptors.
@@ -377,6 +385,16 @@ namespace Falcor
             uint64_t vertexMemoryInBytes = 0;           ///< Total memory in bytes used by the vertex buffer.
             uint64_t geometryMemoryInBytes = 0;         ///< Total memory in bytes used by the geometry data (meshes, curves, custom primitives, instances etc.).
             uint64_t animationMemoryInBytes = 0;        ///< Total memory in bytes used by the animation system (transforms, skinning buffers).
+
+            // Cluster stats
+            uint64_t clusterCount = 0;                      ///< Number of clusters.
+            uint64_t clusterInstanceCount = 0;              ///< Number if cluster instances.
+            uint64_t clusterInstanceOpaqueCount = 0;        ///< Number if cluster instances that are opaque.
+            // uint64_t instancedTriangleCount = 0;         ///< Number of instanced triangles. This is the total number of rendered triangles.
+            // uint64_t instancedVertexCount = 0;           ///< Number of instanced vertices. This is the total number of vertices in the rendered triangles.
+            uint64_t clusterIndexMemoryInBytes = 0;         ///< Total memory in bytes used by the index buffer.
+            uint64_t clusterVertexMemoryInBytes = 0;        ///< Total memory in bytes used by the vertex buffer.
+            // uint64_t clusterGeometryMemoryInBytes = 0;   ///< Total memory in bytes used by the geometry data (meshes, curves, custom primitives, instances etc.).
 
             // Curve stats
             uint64_t curveCount = 0;                    ///< Number of curves.
@@ -718,9 +736,17 @@ namespace Falcor
         */
         uint32_t getMeshCount() const { return (uint32_t)mMeshDesc.size(); }
 
+        /** Get the number of clusters.
+        */
+        uint32_t getClusterCount() const { return (uint32_t)mClusterDesc.size(); }
+
         /** Get a mesh desc.
         */
         const MeshDesc& getMesh(MeshID meshID) const { return mMeshDesc[meshID.get()]; }
+
+        /** Get a cluster desc.
+        */
+        const ClusterDesc& getCluster(ClusterID clusterID) const { return mClusterDesc[clusterID.get()]; }
 
         /** Get mesh vertex and index data.
             \param[in] meshID Mesh ID.
@@ -1131,6 +1157,7 @@ namespace Falcor
         static constexpr uint32_t kVertexBufferCount = kDrawIdBufferIndex + 1;
 
         void createMeshVao(uint32_t drawCount, const std::vector<uint32_t>& indexData, const std::vector<PackedStaticVertexData>& staticData, const std::vector<SkinningVertexData>& skinningData);
+        void createClusterVao(uint32_t drawCount, const std::vector<uint32_t>& indexData, const std::vector<PackedStaticVertexData>& staticData);
         void createCurveVao(const std::vector<uint32_t>& indexData, const std::vector<StaticCurveVertexData>& staticData);
         void createMeshUVTiles(const std::vector<MeshDesc>& meshDesc, const std::vector<uint32_t>& indexData, const std::vector<PackedStaticVertexData>& staticData);
 
@@ -1152,10 +1179,6 @@ namespace Falcor
         /** Uploads geometry data.
         */
         void uploadGeometry();
-
-        /** Uploads nanite cluster GUID data.
-         */
-        void uploadNaniteData();
 
         /** Update the scene's global bounding box.
         */
@@ -1211,6 +1234,10 @@ namespace Falcor
         */
         bool hasIndexBuffer() const { return mpMeshVao && mpMeshVao->getIndexBuffer() != nullptr; }
 
+        /** Checker whether scene has Nanite meshes.
+        */
+        bool hasNaniteMeshes() const { return mpClusterVao; }
+
         /** Initialize all cameras in the scene through the animation controller using their corresponding scene graph nodes.
         */
         void initializeCameras();
@@ -1247,7 +1274,6 @@ namespace Falcor
         void bindSDFGrids();
         void bindLights();
         void bindSelectedCamera();
-        void bindNaniteData();
         void bindParameterBlock();
 
         Scene(ref<Device> pDevice, SceneData&& sceneData);
@@ -1275,6 +1301,7 @@ namespace Falcor
         ref<Vao> mpMeshVao;                                         ///< Vertex array object for the global mesh vertex/index buffers.
         ref<Vao> mpMeshVao16Bit;                                    ///< VAO for drawing meshes with 16-bit vertex indices.
         ref<Vao> mpCurveVao;                                        ///< Vertex array object for the global curve vertex/index buffers.
+        ref<Vao> mpClusterVao;                                      ///< Vertex array object for the global mesh vertex/index buffers.
         std::vector<DrawArgs> mDrawArgs;                            ///< List of draw arguments for rasterizing the meshes in the scene.
 
         // Triangle meshes
@@ -1283,7 +1310,9 @@ namespace Falcor
         std::vector<MeshGroup> mMeshGroups;                         ///< Groups of meshes. Each group maps to a BLAS for ray tracing.
         std::vector<std::string> mMeshNames;                        ///< Mesh names, indxed by mesh ID
         std::vector<Node> mSceneGraph;                              ///< For each index i, the array element indicates the parent node. Indices are in relation to mLocalToWorldMatrices.
-        std::vector<uint64_t> mClusterGUIDs;                        ///< Nanite cluster GUIDs for each triangle.
+
+        // Clusters
+        std::vector<ClusterDesc> mClusterDesc;                      ///< Copy of cluster data GPU buffer (mpClustersBuffer).
 
         /// For Python bindings of triangle meshes.
         ref<ComputePass> mpLoadMeshPass;
@@ -1341,6 +1370,7 @@ namespace Falcor
         // Scene metadata (CPU only)
         std::vector<AABB> mMeshBBs;                                 ///< Bounding boxes for meshes (not instances) in object space.
         std::vector<std::vector<uint32_t>> mMeshIdToInstanceIds;    ///< Mapping of what instances belong to which mesh. The instanceID are sorted in ascending order.
+        std::vector<AABB> mClusterBBs;                              ///< Bounding boxes for clusters in object space.
         std::vector<AABB> mCurveBBs;                                ///< Bounding boxes for curves (not instances) in object space.
         std::vector<std::vector<uint32_t>> mCurveIdToInstanceIds;   ///< Mapping of what instances belong to which curve.
         HitInfo mHitInfo;                                           ///< Geometry hit info requirements.
@@ -1358,11 +1388,11 @@ namespace Falcor
         // Scene block resources
         ref<Buffer> mpGeometryInstancesBuffer;
         ref<Buffer> mpMeshesBuffer;
+        ref<Buffer> mpClustersBuffer;
         ref<Buffer> mpCurvesBuffer;
         ref<Buffer> mpCustomPrimitivesBuffer;
         ref<Buffer> mpLightsBuffer;
         ref<Buffer> mpGridVolumesBuffer;
-        ref<Buffer> mpClusterGUIDsBuffer;
         ref<ParameterBlock> mpSceneBlock;
 
         // Camera

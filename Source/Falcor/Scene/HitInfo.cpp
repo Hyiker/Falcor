@@ -67,6 +67,11 @@ namespace Falcor
             uint32_t triangleCount = scene.getMesh(meshID).getTriangleCount();
             maxPrimitiveCount = std::max(maxPrimitiveCount, triangleCount);
         }
+        for (ClusterID clusterID{ 0 }; clusterID.get() < scene.getClusterCount(); ++clusterID)
+        {
+            uint32_t triangleCount = scene.getCluster(clusterID).getTriangleCount();
+            maxPrimitiveCount = std::max(maxPrimitiveCount, triangleCount);
+        }
         for (CurveID curveID{ 0 }; curveID.get() < scene.getCurveCount(); ++curveID)
         {
             uint32_t curveSegmentCount = scene.getCurve(curveID).getSegmentCount();

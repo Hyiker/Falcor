@@ -120,6 +120,7 @@ struct SceneDebugger
         uint geometryID = PixelData::kInvalidID;
         uint blasID = PixelData::kInvalidID;
         uint64_t clusterID = PixelData::kInvalidID;
+        uint naniteFlag = 0;
 
         VertexData v = {};
 
@@ -128,12 +129,14 @@ struct SceneDebugger
         case HitType::Triangle:
         {
             const TriangleHit triangleHit = hit.getTriangleHit();
+            const GeometryInstanceData instance = gScene.getGeometryInstance(triangleHit.instanceID);
             instanceID = triangleHit.instanceID.index;
-            geometryID = gScene.getGeometryInstance(triangleHit.instanceID).geometryID;
+            geometryID = instance.geometryID;
             primitiveID = triangleHit.primitiveIndex;
-            blasID = meshToBlasID[geometryID];
+            blasID = instance.isNaniteMesh() ? 0 : meshToBlasID[geometryID];
             materialID = gScene.getMaterialID(triangleHit.instanceID);
-            clusterID = gScene.getClusterGUID(triangleHit.instanceID, primitiveID);
+            clusterID = instance.isNaniteMesh() ? gScene.getClusterDesc(triangleHit.instanceID).GUID : 0;
+            naniteFlag = 1;
 
             // Load vertex attributes.
             v = gScene.getVertexData(triangleHit);
@@ -195,6 +198,7 @@ struct SceneDebugger
             d.geometryID = geometryID;
             d.blasID = blasID;
             d.clusterID = clusterID;
+            d.naniteFlag = naniteFlag;
 
             // ShadingData
             d.posW = sd.posW;

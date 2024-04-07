@@ -289,74 +289,87 @@ void SceneDebugger::renderPixelDataUI(Gui::Widgets& widget)
     {
     case HitType::Triangle:
     {
+        bool isNaniteMesh = data.naniteFlag == 1;
         {
             std::string text;
-            text += fmt::format("Mesh ID: {}\n", data.geometryID);
-            text += fmt::format("Mesh name: {}\n", mpScene->hasMesh(data.geometryID) ? mpScene->getMeshName(data.geometryID) : "unknown");
+            text += fmt::format("Nanite mesh: {}\n", isNaniteMesh ? "Yes" : "No");
+            if (isNaniteMesh)
+            {
+                text += fmt::format("Cluster GUID: {}\n", data.clusterID);
+                text += fmt::format("Geometry ID: {}\n", data.geometryID);
+            }
+            else
+            {
+                text += fmt::format("Mesh ID: {}\n", data.geometryID);
+                text +=
+                    fmt::format("Mesh name: {}\n", mpScene->hasMesh(data.geometryID) ? mpScene->getMeshName(data.geometryID) : "unknown");
+            }
             text += fmt::format("Instance ID: {}\n", data.instanceID);
             text += fmt::format("Material ID: {}\n", data.materialID);
             text += fmt::format("BLAS ID: {}\n", data.blasID);
-            text += fmt::format("Cluster GUID: {}\n", data.clusterID);
             widget.text(text);
             widget.dummy("#spacer2", {1, 10});
         }
 
         // Show mesh details.
-        if (auto g = widget.group("Mesh info"); g.open())
+        if (!isNaniteMesh)
         {
-            FALCOR_ASSERT(data.geometryID < mpScene->getMeshCount());
-            const auto& mesh = mpScene->getMesh(MeshID{data.geometryID});
-            std::string text;
-            text += fmt::format("flags: 0x{:08x}\n", mesh.flags);
-            text += fmt::format("materialID: {}\n", mesh.materialID);
-            text += fmt::format("vertexCount: {}\n", mesh.vertexCount);
-            text += fmt::format("indexCount: {}\n", mesh.indexCount);
-            text += fmt::format("triangleCount: {}\n", mesh.getTriangleCount());
-            text += fmt::format("vbOffset: {}\n", mesh.vbOffset);
-            text += fmt::format("ibOffset: {}\n", mesh.ibOffset);
-            text += fmt::format("skinningVbOffset: {}\n", mesh.skinningVbOffset);
-            text += fmt::format("prevVbOffset: {}\n", mesh.prevVbOffset);
-            text += fmt::format("use16BitIndices: {}\n", mesh.use16BitIndices());
-            text += fmt::format("isFrontFaceCW: {}\n", mesh.isFrontFaceCW());
-            g.text(text);
-        }
-
-        // Show mesh instance info.
-        if (auto g = widget.group("Mesh instance info"); g.open())
-        {
-            FALCOR_ASSERT(data.instanceID < mpScene->getGeometryInstanceCount());
-            const auto& instance = mpScene->getGeometryInstance(data.instanceID);
-            std::string text;
-            text += fmt::format("flags: 0x{:08x}\n", instance.flags);
-            text += fmt::format("nodeID: {}\n", instance.globalMatrixID);
-            text += fmt::format("meshID: {}\n", instance.geometryID);
-            text += fmt::format("materialID: {}\n", instance.materialID);
-            text += fmt::format("vbOffset: {}\n", instance.vbOffset);
-            text += fmt::format("ibOffset: {}\n", instance.ibOffset);
-            text += fmt::format("isDynamic: {}\n", instance.isDynamic());
-            g.text(text);
-
-            // Print the list of scene graph nodes affecting this mesh instance.
-            std::vector<NodeID> nodes;
+            if (auto g = widget.group("Mesh info"); g.open())
             {
-                NodeID nodeID{instance.globalMatrixID};
-                while (nodeID != NodeID::Invalid())
-                {
-                    nodes.push_back(nodeID);
-                    nodeID = mpScene->getParentNodeID(nodeID);
-                }
+                FALCOR_ASSERT(data.geometryID < mpScene->getMeshCount());
+                const auto& mesh = mpScene->getMesh(MeshID{data.geometryID});
+                std::string text;
+                text += fmt::format("flags: 0x{:08x}\n", mesh.flags);
+                text += fmt::format("materialID: {}\n", mesh.materialID);
+                text += fmt::format("vertexCount: {}\n", mesh.vertexCount);
+                text += fmt::format("indexCount: {}\n", mesh.indexCount);
+                text += fmt::format("triangleCount: {}\n", mesh.getTriangleCount());
+                text += fmt::format("vbOffset: {}\n", mesh.vbOffset);
+                text += fmt::format("ibOffset: {}\n", mesh.ibOffset);
+                text += fmt::format("skinningVbOffset: {}\n", mesh.skinningVbOffset);
+                text += fmt::format("prevVbOffset: {}\n", mesh.prevVbOffset);
+                text += fmt::format("use16BitIndices: {}\n", mesh.use16BitIndices());
+                text += fmt::format("isFrontFaceCW: {}\n", mesh.isFrontFaceCW());
+                g.text(text);
             }
-            FALCOR_ASSERT(!nodes.empty());
 
-            g.text("Scene graph (root first):");
-            const auto& localMatrices = mpScene->getAnimationController()->getLocalMatrices();
-            for (auto it = nodes.rbegin(); it != nodes.rend(); it++)
+            // Show mesh instance info.
+            if (auto g = widget.group("Mesh instance info"); g.open())
             {
-                auto nodeID = *it;
-                float4x4 mat = localMatrices[nodeID.get()];
-                if (auto nodeGroup = widget.group("ID " + to_string(nodeID)); nodeGroup.open())
+                FALCOR_ASSERT(data.instanceID < mpScene->getGeometryInstanceCount());
+                const auto& instance = mpScene->getGeometryInstance(data.instanceID);
+                std::string text;
+                text += fmt::format("flags: 0x{:08x}\n", instance.flags);
+                text += fmt::format("nodeID: {}\n", instance.globalMatrixID);
+                text += fmt::format("meshID: {}\n", instance.geometryID);
+                text += fmt::format("materialID: {}\n", instance.materialID);
+                text += fmt::format("vbOffset: {}\n", instance.vbOffset);
+                text += fmt::format("ibOffset: {}\n", instance.ibOffset);
+                text += fmt::format("isDynamic: {}\n", instance.isDynamic());
+                g.text(text);
+
+                // Print the list of scene graph nodes affecting this mesh instance.
+                std::vector<NodeID> nodes;
                 {
-                    g.matrix("", mat);
+                    NodeID nodeID{instance.globalMatrixID};
+                    while (nodeID != NodeID::Invalid())
+                    {
+                        nodes.push_back(nodeID);
+                        nodeID = mpScene->getParentNodeID(nodeID);
+                    }
+                }
+                FALCOR_ASSERT(!nodes.empty());
+
+                g.text("Scene graph (root first):");
+                const auto& localMatrices = mpScene->getAnimationController()->getLocalMatrices();
+                for (auto it = nodes.rbegin(); it != nodes.rend(); it++)
+                {
+                    auto nodeID = *it;
+                    float4x4 mat = localMatrices[nodeID.get()];
+                    if (auto nodeGroup = widget.group("ID " + to_string(nodeID)); nodeGroup.open())
+                    {
+                        g.matrix("", mat);
+                    }
                 }
             }
         }

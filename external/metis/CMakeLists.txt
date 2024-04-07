@@ -1,7 +1,7 @@
-cmake_minimum_required(VERSION 2.8)
+cmake_minimum_required(VERSION 3.15)
 project(METIS)
 
-option(METIS_SHARED "Build shared library" ${SHARED})
+option(MESHOPT_BUILD_SHARED_LIBS "Build shared library" OFF)
 option(METIS_INSTALL "Install METIS" OFF)
 option(METIS_BUILD_TEST "Build test programs" OFF)
 

@@ -1014,13 +1014,13 @@ target_link_libraries(Falcor
     imgui imgui_addons
     nanovdb
     external_includes
-    rtxdi
+    rtxdi metis tbb
     $<$<BOOL:${FALCOR_HAS_CUDA}>:CUDA::cuda_driver>
     $<$<BOOL:${FALCOR_HAS_CUDA}>:CUDA::cudart_static>
     PRIVATE
     git_version
     FreeImage assimp OpenEXR OpenVDB lz4 zlib pugixml opensubdiv
-    glfw mikktspace nvtt Ptex_dynamic metis meshoptimizer
+    glfw mikktspace nvtt Ptex_dynamic meshoptimizer
     $<$<BOOL:${FALCOR_HAS_D3D12}>:d3d12>
     $<$<BOOL:${FALCOR_HAS_D3D12_AGILITY_SDK}>:agility-sdk>
     $<$<BOOL:${FALCOR_HAS_AFTERMATH}>:aftermath>

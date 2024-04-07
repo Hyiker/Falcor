@@ -26,9 +26,9 @@ FALCOR_FORCEINLINE uint32_t hashPosition(const float3 position)
         uint32_t i;
     } z;
 
-    x.f = position.x;
-    y.f = position.y;
-    z.f = position.z;
+    x.f = isfinite(position.x) ? position.x : 0.0f;
+    y.f = isfinite(position.y) ? position.y : 0.0f;
+    z.f = isfinite(position.z) ? position.z : 0.0f;
 
     return murmur32({position.x == 0.0f ? 0u : x.i, position.y == 0.0f ? 0u : y.i, position.z == 0.0f ? 0u : z.i});
 }
@@ -58,19 +58,30 @@ FALCOR_FORCEINLINE uint32_t triangleIndexCycle(uint32_t value, uint32_t offset)
     return value - value % 3 + (value + offset) % 3;
 }
 
+/** Validate equality between two finite vectors of the same type.
+ * If any component of the two is not finite, return true(skip these vectors).
+ * Return true iff the all corresponding components of the 2 vectors are equal.
+ */
+template<typename T, int N, std::enable_if_t<std::is_floating_point_v<T>, bool> = false>
+bool vecEq(const math::vector<T, N>& lhs, const math::vector<T, N>& rhs)
+{
+    return any(!isfinite(lhs)) || any(!isfinite(rhs)) || all(lhs == rhs);
+}
+
 template<bool PositionOnly>
 struct PackedStaticVertexDataEqual
 {
     FALCOR_FORCEINLINE bool operator()(const PackedStaticVertexData& lhs, const PackedStaticVertexData& rhs) const
     {
+        FALCOR_ASSERT(all(isfinite(lhs.position) && isfinite(rhs.position)));
         if constexpr (PositionOnly)
         {
             return all(lhs.position == rhs.position);
         }
         else
         {
-            return all(lhs.position == rhs.position) && all(lhs.packedNormalTangentCurveRadius == rhs.packedNormalTangentCurveRadius) &&
-                   all(lhs.texCrd == rhs.texCrd);
+            return all(lhs.position == rhs.position) && vecEq(lhs.packedNormalTangentCurveRadius, rhs.packedNormalTangentCurveRadius) &&
+                   vecEq(lhs.texCrd, rhs.texCrd);
         }
     }
 };
@@ -94,9 +105,53 @@ struct PackedStaticVertexDataHash
     }
 };
 
+template<bool PositionOnly>
+struct StaticVertexDataEqual
+{
+    FALCOR_FORCEINLINE bool operator()(const StaticVertexData& lhs, const StaticVertexData& rhs) const
+    {
+        // position must be valid
+        FALCOR_ASSERT(all(isfinite(lhs.position) && isfinite(rhs.position)));
+        if constexpr (PositionOnly)
+        {
+            return all(lhs.position == rhs.position);
+        }
+        else
+        {
+            bool isCurveRadiusEq = !std::isfinite(lhs.curveRadius) || !std::isfinite(rhs.curveRadius) || lhs.curveRadius == rhs.curveRadius;
+            return all(lhs.position == rhs.position) && vecEq(lhs.normal, rhs.normal) && vecEq(lhs.tangent, rhs.tangent) &&
+                   vecEq(lhs.texCrd, rhs.texCrd) && isCurveRadiusEq;
+        }
+    }
+};
+template<bool PositionOnly>
+struct StaticVertexDataHash
+{
+    FALCOR_FORCEINLINE uint32_t operator()(const StaticVertexData& vertex) const
+    {
+        if constexpr (PositionOnly)
+        {
+            return murmur32({hashPosition(vertex.position)});
+        }
+        else
+        {
+            return murmur32(
+                {hashPosition(vertex.position),
+                 hashPosition(vertex.normal),
+                 hashPosition(vertex.tangent.xyz()),
+                 hashPosition(float3(vertex.texCrd, vertex.curveRadius))}
+            );
+        }
+    }
+};
+
 template<typename ValueType, bool PositionOnly = false>
-using PackedStaticVertexHashMap =
-    std::unordered_map<PackedStaticVertexData, ValueType, PackedStaticVertexDataHash<PositionOnly>, PackedStaticVertexDataEqual<PositionOnly>>;
+using PackedStaticVertexHashMap = std::
+    unordered_map<PackedStaticVertexData, ValueType, PackedStaticVertexDataHash<PositionOnly>, PackedStaticVertexDataEqual<PositionOnly>>;
+
+template<typename ValueType, bool PositionOnly = false>
+using StaticVertexHashMap =
+    std::unordered_map<StaticVertexData, ValueType, StaticVertexDataHash<PositionOnly>, StaticVertexDataEqual<PositionOnly>>;
 
 /**
  * @brief Helper class to hash edges.

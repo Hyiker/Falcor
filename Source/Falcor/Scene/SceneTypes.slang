@@ -97,6 +97,7 @@ enum class GeometryInstanceFlags : uint32_t
     TransformFlipped = 0x4,     ///< Instance transform flips the coordinate system handedness. TODO: Deprecate this flag if we need an extra bit.
     IsObjectFrontFaceCW = 0x8,  ///< Front-facing side has clockwise winding in object space. Note that the winding in world space may be flipped due to the instance transform.
     IsWorldFrontFaceCW = 0x10,  ///< Front-facing side has clockwise winding in world space. This is the combination of the mesh winding and instance transform handedness.
+    IsNaniteMesh = 0x20,        ///< Geometry instance is Nanite clusterized mesh.
 };
 
 struct GeometryInstanceData
@@ -136,6 +137,11 @@ struct GeometryInstanceData
     bool isWorldFrontFaceCW() CONST_FUNCTION
     {
         return (flags & (uint)GeometryInstanceFlags::IsWorldFrontFaceCW) != 0;
+    }
+
+    bool isNaniteMesh() CONST_FUNCTION
+    {
+        return (flags & (uint)GeometryInstanceFlags::IsNaniteMesh) != 0;
     }
 };
 
@@ -205,6 +211,32 @@ struct MeshDesc
     bool isDisplaced() CONST_FUNCTION
     {
         return (flags & (uint)MeshFlags::IsDisplaced) != 0;
+    }
+};
+
+struct ClusterDesc
+{
+    uint64_t GUID;          ///< Cluster global ID.
+    uint vbOffset;          ///< Offset into global cluster vertex buffer.
+    uint ibOffset;          ///< Offset into global cluster index buffer. Clusters must be indexed.
+    uint vertexCount;       ///< Vertex count. TODO: Limit vertex count <= 256
+    uint indexCount;        ///< Index count, or zero if non-indexed.
+    uint materialID;        ///< Material ID.
+    uint flags;             ///< Mesh flags
+
+    uint getVertexCount() CONST_FUNCTION
+    {
+        return vertexCount;
+    }
+
+    uint getTriangleCount() CONST_FUNCTION
+    {
+        return indexCount / 3;
+    }
+
+    bool isFrontFaceCW() CONST_FUNCTION
+    {
+        return (flags & (uint)MeshFlags::IsFrontFaceCW) != 0;
     }
 };
 

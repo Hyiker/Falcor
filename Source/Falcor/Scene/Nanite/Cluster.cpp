@@ -8,11 +8,13 @@ namespace Falcor
 Cluster::Cluster(
     const fstd::span<const PackedStaticVertexData>& vertices,
     std::function<uint32_t(uint32_t)> convertIndex,
+    MaterialID materialID,
     const GraphPartitioner& partitioner,
     const EdgeAdjacency& adjacency,
     const GraphPartitioner::Range& triangleRange,
-    std::function<void(uint32_t, uint64_t)> clusterCallback
+    bool isFrontFaceCW
 )
+    : materialID(materialID), isFrontFaceCW(isFrontFaceCW)
 {
     mGUID = (uint64_t(triangleRange.first) << 32) | triangleRange.second;
     uint32_t numTriangles = triangleRange.second - triangleRange.first;
@@ -26,7 +28,6 @@ Cluster::Cluster(
     for (uint32_t i = triangleRange.first; i < triangleRange.second; i++)
     {
         uint32_t triangleIndex = partitioner.getIndex(i);
-        clusterCallback(triangleIndex, mGUID);
         for (uint32_t j = 0; j < 3; j++)
         {
             uint32_t globalIndex = convertIndex(triangleIndex * 3 + j);
@@ -81,7 +82,9 @@ Cluster::Cluster(
     const EdgeAdjacency& adjacency,
     const GraphPartitioner::Range& triangleRange
 )
-    : mGUID(murmurFinalize64(srcCluster.mGUID) ^ ((uint64_t(triangleRange.first) << 32) | triangleRange.second))
+    : materialID(srcCluster.materialID)
+    , isFrontFaceCW(srcCluster.isFrontFaceCW)
+    , mGUID(murmurFinalize64(srcCluster.mGUID) ^ ((uint64_t(triangleRange.first) << 32) | triangleRange.second))
 {
     uint32_t numTriangles = triangleRange.second - triangleRange.first;
 
@@ -305,10 +308,17 @@ Cluster Cluster::merge(fstd::span<const Cluster*> pClusters)
     merged.mExternalEdgeCount = 0;
 
     PackedStaticVertexHashMap<uint32_t, true> vertexMap;
+    auto materialID = pClusters[0]->materialID;
+    bool isFrontFaceCW = pClusters[0]->isFrontFaceCW;
     for (const auto& pCluster : pClusters)
     {
+        FALCOR_CHECK(materialID == pCluster->materialID, "Merge cluster material ID mismatch: {} != {}", materialID, pCluster->materialID);
+        FALCOR_CHECK(
+            isFrontFaceCW == pCluster->isFrontFaceCW, "Merge cluster clockwise mismatch: {} != {}", isFrontFaceCW, pCluster->isFrontFaceCW
+        );
         merged.mBoundingBox |= pCluster->mBoundingBox;
         merged.mSurfaceArea += pCluster->mSurfaceArea;
+        merged.instances.insert(pCluster->instances.begin(), pCluster->instances.end());
 
         for (uint32_t i = 0; i < pCluster->mIndices.size(); i++)
         {
@@ -370,6 +380,8 @@ Cluster Cluster::merge(fstd::span<const Cluster*> pClusters)
     merged.mVertices.shrink_to_fit();
     merged.mIndices.shrink_to_fit();
     merged.mExternalEdges.shrink_to_fit();
+    merged.materialID = materialID;
+    merged.isFrontFaceCW = isFrontFaceCW;
 
     return merged;
 }

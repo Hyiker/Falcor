@@ -853,6 +853,7 @@ private:
     // Scene setup
     void createMeshData();
     void createMeshInstanceData(uint32_t& tlasInstanceIndex);
+    void createClusterInstanceData(uint32_t& tlasInstanceIndex);
     void createCurveData();
     void createCurveInstanceData(uint32_t& tlasInstanceIndex);
     void createSceneGraph();

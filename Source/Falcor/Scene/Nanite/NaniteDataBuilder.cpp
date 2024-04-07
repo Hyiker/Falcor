@@ -12,11 +12,35 @@
 
 namespace Falcor
 {
-void NaniteDataBuilder::buildNaniteData(
-    fstd::span<const PackedStaticVertexData> vertices,
-    fstd::span<const uint32_t> triangleIndices,
-    fstd::span<const SceneBuilder::MeshSpec> meshList
-)
+
+// Optimize an original mesh by:
+// 1. Dedup mesh vertices
+void optimizeMesh(NaniteDataBuilder::MeshSpec& meshSpec)
+{
+    StaticVertexHashMap<uint32_t> vertexHash;
+    std::vector<StaticVertexData> newVertexData;
+    newVertexData.reserve(meshSpec.staticData.size());
+    for (uint32_t& index : meshSpec.indexData)
+    {
+        const auto& vert = meshSpec.staticData[index];
+        auto it = vertexHash.find(vert);
+        if (it == vertexHash.end())
+        {
+            index = newVertexData.size();
+            vertexHash[vert] = index;
+            newVertexData.push_back(vert);
+        }
+        else
+        {
+            index = it->second;
+        }
+    }
+    newVertexData.shrink_to_fit();
+    meshSpec.vertexCount = newVertexData.size();
+    meshSpec.staticData = std::move(newVertexData);
+}
+
+void NaniteDataBuilder::buildNaniteData(std::vector<MeshSpec>& meshList)
 {
     // manually calculate the triangle count due to the existence of 16bit indices
     uint32_t triangleCount = std::accumulate(
@@ -26,28 +50,29 @@ void NaniteDataBuilder::buildNaniteData(
                                  [](uint32_t sum, const SceneBuilder::MeshSpec& meshSpec) { return sum + meshSpec.indexCount; }
                              ) /
                              3;
-    mClusterGUIDs.resize(triangleCount);
-    std::vector<const SceneBuilder::MeshSpec*> staticMeshList;
+    std::vector<SceneBuilder::MeshSpec> staticMeshList;
     std::vector<uint32_t> clusterCounts;
     staticMeshList.reserve(meshList.size());
     clusterCounts.reserve(meshList.size());
 
-    // Preprocess: filter all static meshes
-    for (const auto& meshSpec : meshList)
-    {
-        if (meshSpec.isStatic && meshSpec.indexCount > 0)
-        {
-            staticMeshList.push_back(&meshSpec);
-        }
-    }
+    // Move all static meshes to the list, and remove them from meshList
+    // TBN, isStatic indicates whether mesh is instanced. Instanced mesh supported will be implemented in the future.
+    auto canClusterize = [](const MeshSpec& mesh)
+    { return mesh.isStatic && !mesh.isDynamic() && mesh.topology == Vao::Topology::TriangleList; };
+    auto p = std::stable_partition(meshList.begin(), meshList.end(), std::not_fn(canClusterize));
+    staticMeshList.insert(staticMeshList.end(), std::make_move_iterator(p), std::make_move_iterator(meshList.end()));
+    meshList.erase(p, meshList.end());
     staticMeshList.shrink_to_fit();
 
     TimeReport report;
 
-    // TODO: parallelize this
-    for (const auto* pStaticMesh : staticMeshList)
+    for (auto& staticMesh : staticMeshList)
     {
-        auto clusters = clusterTriangles(vertices, triangleIndices, *pStaticMesh);
+        optimizeMesh(staticMesh);
+        FALCOR_CHECK(staticMesh.indexOffset == 0, "MeshSpec::indexOffset is not zero");
+        FALCOR_CHECK(staticMesh.staticVertexOffset == 0, "MeshSpec::staticVertexOffset is not zero");
+
+        auto clusters = clusterTriangles(staticMesh.staticData, staticMesh.indexData, staticMesh);
         clusterCounts.push_back(uint32_t(clusters.size()));
         mClusters.insert(mClusters.end(), std::move_iterator(clusters.begin()), std::move_iterator(clusters.end()));
     }
@@ -57,7 +82,7 @@ void NaniteDataBuilder::buildNaniteData(
     uint32_t clusterOffset = 0;
     for (uint32_t clusterSize : clusterCounts)
     {
-        buildDAG(clusterOffset, clusterSize);
+        // buildDAG(clusterOffset, clusterSize);
         clusterOffset += clusterSize;
     }
     report.measure("Build DAG");
@@ -72,9 +97,9 @@ void NaniteDataBuilder::buildNaniteData(
 }
 
 std::vector<Cluster> NaniteDataBuilder::clusterTriangles(
-    fstd::span<const PackedStaticVertexData> vertices,
+    fstd::span<const StaticVertexData> vertices,
     fstd::span<const uint32_t> triangleIndices,
-    const SceneBuilder::MeshSpec& meshSpec
+    const MeshSpec& meshSpec
 )
 {
     FALCOR_CHECK(meshSpec.isStatic, "Nanite only supports static meshes for now.");
@@ -211,12 +236,22 @@ std::vector<Cluster> NaniteDataBuilder::clusterTriangles(
     const auto& ranges = partitioner.getRanges();
     // index straight to uint32 index array
     const uint32_t triangleBase = meshSpec.indexOffset / 3;
-    auto clusterCreationCallback = [&](uint32_t triangleOffset, uint64_t clusterGUID)
-    { mClusterGUIDs[triangleBase + triangleOffset] = clusterGUID; };
+    std::vector<PackedStaticVertexData> packedVertices(meshSpec.vertexCount);
+    std::transform(
+        std::move_iterator(vertices.begin()),
+        std::move_iterator(vertices.end()),
+        packedVertices.begin(),
+        [](const StaticVertexData& unpackedData) { return PackedStaticVertexData(unpackedData); }
+    );
     tbb::parallel_for(
         0u,
         uint32_t(partitioner.getRangesCount()),
-        [&](uint32_t i) { clusters[i] = Cluster(vertices, convertIndex, partitioner, edgeAdjacency, ranges[i], clusterCreationCallback); }
+        [&](uint32_t i)
+        {
+            clusters[i] =
+                Cluster(packedVertices, convertIndex, meshSpec.materialId, partitioner, edgeAdjacency, ranges[i], meshSpec.isFrontFaceCW);
+            clusters[i].instances = meshSpec.instances;
+        }
     );
     return clusters;
 }
@@ -345,7 +380,7 @@ void NaniteDataBuilder::buildDAG(uint32_t clusterRangeStart, uint32_t clusterRan
             uint32_t maxParents = 0;
             for (const auto& cluster : levelClusters)
             {
-                maxParents += div_round_up(uint32_t(cluster.getIndicesSize()), Cluster::kSize * 6);
+                maxParents += div_round_up(uint32_t(cluster.getIndexCount()), Cluster::kSize * 6);
                 children.push_back(clusterLevelOffset++);
             }
 
