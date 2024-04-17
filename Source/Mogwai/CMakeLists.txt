@@ -8,6 +8,8 @@ target_sources(Mogwai PRIVATE
     MogwaiScripting.cpp
     MogwaiSettings.cpp
     MogwaiSettings.h
+    Network.h
+    Network.cpp
 
     Extensions/Capture/CaptureTrigger.cpp
     Extensions/Capture/CaptureTrigger.h
@@ -17,6 +19,6 @@ target_sources(Mogwai PRIVATE
     Extensions/Profiler/TimingCapture.h
 )
 
-target_link_libraries(Mogwai PRIVATE args)
+target_link_libraries(Mogwai PRIVATE args websockets ${LIBWEBSOCKETS_DEP_LIBS})
 
 target_source_group(Mogwai "/")

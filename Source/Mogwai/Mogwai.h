@@ -31,6 +31,7 @@
 #include "Scene/SceneBuilder.h"
 #include "RenderGraph/RenderGraph.h"
 #include "AppData.h"
+#include "Network.h"
 
 namespace Falcor
 {
@@ -203,6 +204,9 @@ namespace Mogwai
 
         KeyCallback mKeyCallback;
         FILE*       mPipedOutput = nullptr;
+
+        // Network server
+        NetworkServer mServer;
 
         // Scripting
         void registerScriptBindings(pybind11::module& m);
