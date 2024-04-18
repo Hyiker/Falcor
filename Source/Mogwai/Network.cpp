@@ -6,11 +6,55 @@ constexpr int kRingDepth = 4096;
 
 struct WebSocketMessage
 {
-    void* payload; /* is malloc'd */
-    size_t len;
-    char binary;
-    char first;
-    char final;
+    char* payload = nullptr;
+    size_t len = 0;
+    char binary = 0;
+    char first = 0;
+    char final = 0;
+
+    WebSocketMessage() = default;
+    WebSocketMessage(char* _payload, size_t _len, char _binary, char _first, char _final)
+        : payload(_payload), len(_len), binary(_binary), first(_first), final(_final)
+    {}
+    /** Allocate and copy the payload.
+     */
+    void setPayload(fstd::span<char> _payload)
+    {
+        if (payload)
+        {
+            Falcor::logWarning("WebSocketMessage::payload not null, freeing it");
+            delete payload;
+            payload = nullptr;
+        }
+        payload = new char[_payload.size()];
+        len = _payload.size();
+        memcpy(payload, _payload.data(), len);
+    }
+
+    static void destroy(void* _msg)
+    {
+        WebSocketMessage* msg = (WebSocketMessage*)_msg;
+        free(msg->payload);
+        msg->payload = nullptr;
+        msg->len = 0;
+    }
+
+    /** Write payload message to the socket.
+     *  Automatically allocate LWS_PRE header space.
+     */
+    int write(struct lws* wsi)
+    {
+        if (!payload)
+        {
+            Falcor::logError("WebSocketMessage::payload is null");
+            return -1;
+        }
+
+        int flags = lws_write_ws_flags(binary ? LWS_WRITE_BINARY : LWS_WRITE_TEXT, first, final);
+        std::vector<char> buffer(len + LWS_PRE);
+        memcpy(buffer.data() + LWS_PRE, payload, len);
+        return lws_write(wsi, (unsigned char*)buffer.data() + LWS_PRE, len, (lws_write_protocol)flags);
+    }
 };
 struct SessionData
 {
@@ -28,22 +72,13 @@ struct VHostStorage
     struct lws_vhost* vhost;
 };
 
-static void __minimal_destroy_message(void* _msg)
-{
-    struct WebSocketMessage* msg = (struct WebSocketMessage*)_msg;
-
-    free(msg->payload);
-    msg->payload = NULL;
-    msg->len = 0;
-}
-
 int callback_minimal_server_echo(struct lws* wsi, enum lws_callback_reasons reason, void* user, void* in, size_t len)
 {
     SessionData* pss = (SessionData*)user;
     VHostStorage* vhd = (VHostStorage*)lws_protocol_vh_priv_get(lws_get_vhost(wsi), lws_get_protocol(wsi));
-    const WebSocketMessage* pmsg;
+    // Request message data
     WebSocketMessage amsg;
-    int m, n, flags;
+    int n;
 
     switch (reason)
     {
@@ -60,7 +95,7 @@ int callback_minimal_server_echo(struct lws* wsi, enum lws_callback_reasons reas
     case LWS_CALLBACK_ESTABLISHED:
         /* generate a block of output before travis times us out */
         Falcor::logInfo("LWS_CALLBACK_ESTABLISHED");
-        pss->ring = lws_ring_create(sizeof(struct WebSocketMessage), kRingDepth, __minimal_destroy_message);
+        pss->ring = lws_ring_create(sizeof(WebSocketMessage), kRingDepth, WebSocketMessage::destroy);
         if (!pss->ring)
             return 1;
         pss->tail = 0;
@@ -68,8 +103,6 @@ int callback_minimal_server_echo(struct lws* wsi, enum lws_callback_reasons reas
 
     case LWS_CALLBACK_SERVER_WRITEABLE:
     {
-        Falcor::logInfo("LWS_CALLBACK_SERVER_WRITEABLE");
-
         if (pss->write_consume_pending)
         {
             /* perform the deferred fifo consume */
@@ -77,29 +110,23 @@ int callback_minimal_server_echo(struct lws* wsi, enum lws_callback_reasons reas
             pss->write_consume_pending = 0;
         }
 
-        pmsg = (WebSocketMessage*)lws_ring_get_element(pss->ring, &pss->tail);
+        const auto* pmsg = (WebSocketMessage*)lws_ring_get_element(pss->ring, &pss->tail);
         if (!pmsg)
         {
-            Falcor::logInfo(" (nothing in ring)");
             break;
         }
 
-        flags = lws_write_ws_flags(pmsg->binary ? LWS_WRITE_BINARY : LWS_WRITE_TEXT, pmsg->first, pmsg->final);
-
         NetworkServer* server = (NetworkServer*)lws_vhost_user(lws_get_vhost(wsi));
         std::string response = server->dispatch((const char*)pmsg->payload);
-        std::vector<char> responseBuffer(response.begin(), response.end());
-        responseBuffer.insert(responseBuffer.begin(), LWS_PRE, char(0));
 
-        /* notice we allowed for LWS_PRE in the payload already */
-        m = lws_write(wsi, ((unsigned char*)responseBuffer.data()) + LWS_PRE, responseBuffer.size() - LWS_PRE, (lws_write_protocol)flags);
-        if (m < (int)responseBuffer.size() - LWS_PRE)
+        amsg = WebSocketMessage(const_cast<char*>(response.c_str()), response.size(), false, true, true);
+
+        int m = amsg.write(wsi);
+        if (m < (int)amsg.len)
         {
-            Falcor::logError("{} writing to ws socket", m);
+            Falcor::logError("Incomplete write: {}/{}", m, (int)amsg.len);
             return -1;
         }
-
-        Falcor::logInfo("wrote {}: flags: 0x{:x} first: {} final {}", m, flags, pmsg->first, pmsg->final);
         /*
          * Workaround deferred deflate in pmd extension by only
          * consuming the fifo entry when we are certain it has been
@@ -122,33 +149,13 @@ int callback_minimal_server_echo(struct lws* wsi, enum lws_callback_reasons reas
     }
 
     case LWS_CALLBACK_RECEIVE:
-
-        Falcor::logInfo(
-            "LWS_CALLBACK_RECEIVE: {0:4d} (rpp {1:5d}, first {2:d}, last {3:d}, bin {4:d}, msglen {5:d} (+ {6:d} = {7:d}))",
-            static_cast<int>(len),
-            static_cast<int>(lws_remaining_packet_payload(wsi)),
-            lws_is_first_fragment(wsi),
-            lws_is_final_fragment(wsi),
-            lws_frame_is_binary(wsi),
-            pss->msglen,
-            static_cast<int>(len),
-            static_cast<int>(pss->msglen) + static_cast<int>(len)
-        );
-
-        if (len)
-        {
-            ;
-            // puts((const char *)in);
-            // lwsl_hexdump_notice(in, len);
-        }
-
         amsg.first = (char)lws_is_first_fragment(wsi);
         amsg.final = (char)lws_is_final_fragment(wsi);
         amsg.binary = (char)lws_frame_is_binary(wsi);
         n = (int)lws_ring_get_count_free_elements(pss->ring);
         if (!n)
         {
-            Falcor::logInfo("dropping!");
+            Falcor::logWarning("No space in the ring, dropping");
             break;
         }
 
@@ -158,19 +165,11 @@ int callback_minimal_server_echo(struct lws* wsi, enum lws_callback_reasons reas
             pss->msglen += (uint32_t)len;
 
         amsg.len = len;
-        /* notice we over-allocate by LWS_PRE */
-        amsg.payload = malloc(LWS_PRE + len);
-        if (!amsg.payload)
-        {
-            Falcor::logInfo("OOM: dropping");
-            break;
-        }
-
-        memcpy((char*)amsg.payload + LWS_PRE, in, len);
+        amsg.setPayload(fstd::span<char>((char*)in, len));
         if (!lws_ring_insert(pss->ring, &amsg, 1))
         {
-            __minimal_destroy_message(&amsg);
-            Falcor::logInfo("dropping!");
+            WebSocketMessage::destroy(&amsg);
+            Falcor::logWarning("No space in the ring, dropping");
             break;
         }
         lws_callback_on_writable(wsi);
@@ -201,7 +200,7 @@ const lws_protocols kProtocols[] = {
     {"lws-minimal-server-echo", callback_minimal_server_echo, sizeof(struct SessionData), 1024, 0, nullptr, 0},
     LWS_PROTOCOL_LIST_TERM};
 
-NetworkServer::NetworkServer(const std::string& host, int port)
+NetworkServer::NetworkServer(const std::string& host, int port, Clock& clock) : mClock(clock)
 {
     // Init LWS server context
     lws_context_creation_info info{};
@@ -226,11 +225,9 @@ NetworkServer::NetworkServer(const std::string& host, int port)
     Falcor::logInfo("Serving at ws://{}:{}", host, port);
 }
 
-std::string NetworkServer::dispatch(const char* requestPayload) const
+std::string NetworkServer::dispatch(const std::string& clientMsg) const
 {
-    static int count = 0;
-
-    return fmt::format("{}", count++);
+    return std::to_string(getSceneAnimationTime());
 }
 
 NetworkServer::~NetworkServer()
@@ -238,4 +235,9 @@ NetworkServer::~NetworkServer()
     mServerStop = true;
     mpServerThread->detach();
 }
+double NetworkServer::getSceneAnimationTime() const
+{
+    return mClock.getTime();
+}
+
 } // namespace Mogwai
