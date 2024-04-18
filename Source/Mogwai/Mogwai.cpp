@@ -61,7 +61,7 @@ const std::filesystem::path kAppDataPath = getAppDataDirectory() / "NVIDIA/Falco
 size_t Renderer::DebugWindow::index = 0;
 
 Renderer::Renderer(const SampleAppConfig& config, const Options& options)
-    : SampleApp(config), mOptions(options), mAppData(kAppDataPath), mServer("0.0.0.0", 8087)
+    : SampleApp(config), mOptions(options), mAppData(kAppDataPath), mServer("0.0.0.0", 8087, getGlobalClock())
 {
     setActivePythonRenderGraphDevice(getDevice());
 }
