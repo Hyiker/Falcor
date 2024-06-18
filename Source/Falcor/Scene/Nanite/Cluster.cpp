@@ -83,8 +83,12 @@ Cluster::Cluster(
     const GraphPartitioner::Range& triangleRange
 )
     : materialID(srcCluster.materialID)
+    , instances(srcCluster.instances)
     , isFrontFaceCW(srcCluster.isFrontFaceCW)
+    , children(srcCluster.children)
     , mGUID(murmurFinalize64(srcCluster.mGUID) ^ ((uint64_t(triangleRange.first) << 32) | triangleRange.second))
+    , mMipLevel(srcCluster.mMipLevel)
+    , mError(srcCluster.mError)
 {
     uint32_t numTriangles = triangleRange.second - triangleRange.first;
 
@@ -167,13 +171,15 @@ void Cluster::finalize()
     mSurfaceArea *= 0.5f;
 }
 
-float Cluster::simplify(uint32_t targetTriangleCount, float targetError, uint32_t maxTriangles)
+float Cluster::simplify(uint32_t targetTriangleCount, float targetError, float maxError)
 {
     uint32_t triangleCount = mIndices.size() / 3;
-    if ((targetTriangleCount >= triangleCount && targetError == 0.0f) || maxTriangles >= triangleCount)
+    if (targetTriangleCount >= triangleCount || targetError >= 1.f)
     {
         return 0.0f;
     }
+
+    FALCOR_CHECK(maxError == 0.f || maxError > targetError, "Max error must be zero or greater than target error");
 
     float triangleSize = std::sqrt(mSurfaceArea / (float)triangleCount);
 
@@ -210,8 +216,13 @@ float Cluster::simplify(uint32_t targetTriangleCount, float targetError, uint32_
     FALCOR_CHECK(targetError >= 0.0f && targetError <= 1.f, "Invalid target error: {}", targetError);
 
     MeshOptimizer optimizer(mVertices, mIndices);
+    optimizer.setLockBorder(true);
 
-    float resultError = optimizer.simplify(targetTriangleCount, targetError);
+    float resultError;
+    if (maxError == 0.f)
+        resultError = optimizer.simplify(targetTriangleCount, targetError);
+    else
+        resultError = optimizer.simplifyIterative(targetTriangleCount, targetError, maxError);
 
     FALCOR_CHECK(optimizer.getSimplifiedIndicesCount() > 0, "Invalid simplified indices size");
     FALCOR_CHECK(optimizer.getSimplifiedVerticesCount() > 0, "Invalid simplified vertices size");
@@ -233,6 +244,7 @@ float Cluster::simplify(uint32_t targetTriangleCount, float targetError, uint32_
             mExternalEdgeCount++;
         }
     }
+    mError = resultError;
 
     return resultError;
 }
@@ -317,6 +329,8 @@ Cluster Cluster::merge(fstd::span<const Cluster*> pClusters)
             isFrontFaceCW == pCluster->isFrontFaceCW, "Merge cluster clockwise mismatch: {} != {}", isFrontFaceCW, pCluster->isFrontFaceCW
         );
         merged.mBoundingBox |= pCluster->mBoundingBox;
+        merged.mMipLevel = std::max(merged.mMipLevel, pCluster->mMipLevel + 1);
+        merged.mError = std::max(merged.mError, pCluster->mError);
         merged.mSurfaceArea += pCluster->mSurfaceArea;
         merged.instances.insert(pCluster->instances.begin(), pCluster->instances.end());
 

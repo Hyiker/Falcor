@@ -16,12 +16,34 @@ public:
         Locked = (1 << 3),        // Vert is locked, disallowing position movement
         RemoveTriMask = (1 << 4), // Triangle will overlap another after merge and should be removed
     };
-    MeshOptimizer(fstd::span<PackedStaticVertexData> vertices, fstd::span<uint32_t> indices);
-    float simplify(uint32_t targetTriCount, float targetError);
-    // void lockPosition(const float3& position);
 
-    auto getSimplifiedIndicesCount() const { return mSimplifiedIndicesCount; }
+    MeshOptimizer(fstd::span<PackedStaticVertexData> vertices, fstd::span<uint32_t> indices);
+
+    /**
+     * @brief Simplify the mesh.
+     *
+     * @param targetTriCount Desired triangle count.
+     * @param targetError Desired error.
+     * @return The actual error.
+     */
+    float simplify(uint32_t targetTriCount, float targetError);
+
+    /**
+     * @brief Iteratively simplify the mesh.
+     *        Iteration stops when the error is below maxError or the target triangle count is reached.
+     * @param targetTriCount Desired triangle count.
+     * @param targetError Desired error.
+     * @param maxError Maximum error.
+     * @param maxIterations Maximum number of iterations.
+     * @return The actual error.
+     */
+    float simplifyIterative(uint32_t targetTriCount, float targetError, float maxError, uint32_t maxIterations = 3);
+
+    auto getSimplifiedIndicesCount() const { return mSimplifiedIndexCount; }
+
     auto getSimplifiedVerticesCount() const { return mSimplifiedVerticesCount; }
+
+    void setLockBorder(bool lockBorder) { mLockBorder = lockBorder; }
 
 private:
     void remapIndices();
@@ -32,9 +54,9 @@ private:
     std::vector<PackedStaticVertexData> mVerticesRemap;
     std::vector<uint32_t> mIndicesRemap;
 
-    std::vector<uint32_t> mIndicesSimplified;
-
-    uint32_t mSimplifiedIndicesCount = 0;
+    uint32_t mSimplifiedIndexCount = 0;
     uint32_t mSimplifiedVerticesCount = 0;
+
+    bool mLockBorder = false;
 };
 } // namespace Falcor

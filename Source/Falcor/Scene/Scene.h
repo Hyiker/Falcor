@@ -42,7 +42,6 @@
 #include "Volume/GridVolume.h"
 #include "Volume/Grid.h"
 #include "SDFs/SDFGrid.h"
-#include "Scene/Nanite/Cluster.h"
 
 #include "Core/Macros.h"
 #include "Core/Object.h"
@@ -155,6 +154,7 @@ namespace Falcor
             TypeConformancesChanged     = 0x4000000,    ///< Type conformances changed. All programs that access the scene must be updated!
             ShaderCodeChanged           = 0x8000000,    ///< Shader code changed. All programs that access the scene must be updated!
             EmissiveMaterialsChanged    = 0x10000000,   ///< Emissive materials changed.
+            NaniteDataChanged           = 0x20000000,   ///< Nanite data(including LOD selection, config) changed.
 
             /// Flags indicating that programs that access the scene need to be recompiled.
             /// This is needed if defines, type conformances, and/or the shader code has changed.
@@ -231,6 +231,13 @@ namespace Falcor
             bool operator!=(const SDFGridConfig& other) const { return !(*this == other); }
         };
 
+        struct NaniteConfig
+        {
+            float clusterErrorThreshold = -1.f;
+            bool operator==(const NaniteConfig& other) const { return clusterErrorThreshold == other.clusterErrorThreshold; }
+            bool operator!=(const NaniteConfig& other) const { return !(*this == other); }
+        };
+
         /** Render settings determining how the scene is rendered.
             This is used primarily by the path tracer renderers.
         */
@@ -286,6 +293,15 @@ namespace Falcor
             std::vector<MeshID> meshList;       ///< List of meshId's that are part of the group.
             bool isStatic = false;              ///< True if group represents static non-instanced geometry.
             bool isDisplaced = false;           ///< True if group uses displacement mapping.
+        };
+
+        /** DAG node for runtime cluster reduction.
+         */
+        struct ClusterNode
+        {
+            std::vector<ClusterID> childrenCluster; ///< Children cluster indices.
+            float error = 0.f;                      ///< Error metric for LOD selection.
+            int mipLevel = 0;                       ///< Mip level for LOD selection.
         };
 
         /** Scene graph node.
@@ -344,9 +360,15 @@ namespace Falcor
             std::vector<ClusterDesc> clusterDesc;                   ///< List of cluster descriptors.
             std::vector<AABB> clusterBBs;                           ///< List of cluster bounding boxes in object space.
             std::vector<GeometryInstanceData> clusterInstanceData;  ///< List of cluster instances.
+            std::vector<ClusterNode> clusterNodes;                  ///< List of cluster nodes for runtime reduction.
+            std::vector<ClusterID> clusterRoots;                    ///< List of cluster roots.
+            std::vector<uint32_t> clusterDAGDegrees;                ///< Degree of each cluster in the DAG.
+
+            uint32_t clusterDrawCount;                              ///< Number of clusters to draw.
+
+            bool has16BitClusterIndices = false;                    ///< True if 16-bit cluster indices are used.
             std::vector<uint32_t> clusterIndexData;                 ///< Vertex indices for all clusters, 32-bit format packed tightly.(TODO: use 8-bit index)
             std::vector<PackedStaticVertexData> clusterVertexData;  ///< Vertex attributes for all clusters in packed format.
-            uint32_t clusterDrawCount;                              ///< Number of clusters to draw.
 
             // Curve data
             std::vector<CurveDesc> curveDesc;                       ///< List of curve descriptors.
@@ -389,12 +411,10 @@ namespace Falcor
             // Cluster stats
             uint64_t clusterCount = 0;                      ///< Number of clusters.
             uint64_t clusterInstanceCount = 0;              ///< Number if cluster instances.
+            uint64_t clusterSelectionCount = 0;             ///< Number if selected clusters.
             uint64_t clusterInstanceOpaqueCount = 0;        ///< Number if cluster instances that are opaque.
             // uint64_t instancedTriangleCount = 0;         ///< Number of instanced triangles. This is the total number of rendered triangles.
             // uint64_t instancedVertexCount = 0;           ///< Number of instanced vertices. This is the total number of vertices in the rendered triangles.
-            uint64_t clusterIndexMemoryInBytes = 0;         ///< Total memory in bytes used by the index buffer.
-            uint64_t clusterVertexMemoryInBytes = 0;        ///< Total memory in bytes used by the vertex buffer.
-            // uint64_t clusterGeometryMemoryInBytes = 0;   ///< Total memory in bytes used by the geometry data (meshes, curves, custom primitives, instances etc.).
 
             // Curve stats
             uint64_t curveCount = 0;                    ///< Number of curves.
@@ -676,11 +696,18 @@ namespace Falcor
         */
         bool hasProceduralGeometry() const { return hasGeometryTypes(~GeometryTypeFlags::TriangleMesh); };
 
-        /** Get the number of geometries in the scene.
-            This includes all types of geometry that exist in the ray tracing acceleration structures.
+        /** Get the number of geometries in the scene(including active and inactive ones).
+            This includes all types of geometry that either exist in the ray tracing acceleration structures
+            or reside in host memory.
             \return Total number of geometries.
         */
         uint32_t getGeometryCount() const;
+
+        /** Get the number of active geometries in the scene.
+            This includes all types of geometry that exist in the ray tracing acceleration structures.
+            \return Total number of geometries.
+        */
+        uint32_t getActiveGeometryCount() const;
 
         /** Get the number of geometry instances in the scene.
             This includes all types of geometry instances that exist in the ray tracing acceleration structures.
@@ -747,6 +774,10 @@ namespace Falcor
         /** Get a cluster desc.
         */
         const ClusterDesc& getCluster(ClusterID clusterID) const { return mClusterDesc[clusterID.get()]; }
+
+        /** Get a cluster node.
+         */
+        const ClusterNode& getClusterNode(ClusterID clusterID) const { return mClusterNodes[clusterID.get()]; }
 
         /** Get mesh vertex and index data.
             \param[in] meshID Mesh ID.
@@ -1260,6 +1291,7 @@ namespace Falcor
         UpdateFlags updateRaytracingAABBData(bool forceUpdate);
         UpdateFlags updateDisplacement(RenderContext* pRenderContext, bool forceUpdate);
         UpdateFlags updateSDFGrids(RenderContext* pRenderContext);
+        UpdateFlags updateClusterSelection(bool forceUpdate);
 
         void updateGeometryStats();
         void updateMaterialStats();
@@ -1297,6 +1329,7 @@ namespace Falcor
         bool mUseCompressedHitInfo = false;                         ///< True if scene should used compressed HitInfo (on scenes with triangles meshes only).
         bool mHas16BitIndices = false;                              ///< True if any meshes use 16-bit indices.
         bool mHas32BitIndices = false;                              ///< True if any meshes use 32-bit indices.
+        bool mHas16BitClusterIndices = false;                       ///< True if any clusters use 16-bit indices.
 
         ref<Vao> mpMeshVao;                                         ///< Vertex array object for the global mesh vertex/index buffers.
         ref<Vao> mpMeshVao16Bit;                                    ///< VAO for drawing meshes with 16-bit vertex indices.
@@ -1313,6 +1346,13 @@ namespace Falcor
 
         // Clusters
         std::vector<ClusterDesc> mClusterDesc;                      ///< Copy of cluster data GPU buffer (mpClustersBuffer).
+        std::vector<ClusterNode> mClusterNodes;                     ///< Cluster DAG nodes for runtime LOD selection.
+        std::vector<ClusterID> mClusterRoots;                       ///< Root nodes of the cluster DAG.
+        std::vector<ClusterID> mClusterSelection;                   ///< Selected cluster LODs.
+        std::vector<uint32_t>  mClusterDAGDegrees;                   ///< In degree of each node in the cluster DAG.
+        uint64_t mClusterSelectionHash = 0ull;                      ///< Hash value of currently selected clusters(xor value of GUIDs).
+        NaniteConfig mNaniteConfig;                                 ///< Nanite configuration.
+        NaniteConfig mPrevNaniteConfig;
 
         /// For Python bindings of triangle meshes.
         ref<ComputePass> mpLoadMeshPass;

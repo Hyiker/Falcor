@@ -779,6 +779,7 @@ private:
     using MeshGroup = Scene::MeshGroup;
     using MeshGroupList = std::vector<MeshGroup>;
     using CurveList = std::vector<CurveSpec>;
+    using ClusterNode = Scene::ClusterNode;
 
     ref<Device> mpDevice;
 

@@ -130,13 +130,13 @@ struct SceneDebugger
         {
             const TriangleHit triangleHit = hit.getTriangleHit();
             const GeometryInstanceData instance = gScene.getGeometryInstance(triangleHit.instanceID);
+            naniteFlag = instance.isNaniteMesh();
             instanceID = triangleHit.instanceID.index;
             geometryID = instance.geometryID;
             primitiveID = triangleHit.primitiveIndex;
             blasID = instance.isNaniteMesh() ? 0 : meshToBlasID[geometryID];
             materialID = gScene.getMaterialID(triangleHit.instanceID);
             clusterID = instance.isNaniteMesh() ? gScene.getClusterDesc(triangleHit.instanceID).GUID : 0;
-            naniteFlag = 1;
 
             // Load vertex attributes.
             v = gScene.getVertexData(triangleHit);

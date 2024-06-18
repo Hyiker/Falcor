@@ -182,7 +182,9 @@ namespace Falcor
             // We only support triangle meshes.
             if (instanceData.getType() != GeometryType::TriangleMesh) continue;
 
-            const MeshDesc& meshData = scene.getMesh(MeshID::fromSlang( instanceData.geometryID ));
+            uint32_t triangleCount = instanceData.isNaniteMesh()
+                                         ? scene.getCluster(ClusterID::fromSlang(instanceData.geometryID)).getTriangleCount()
+                                         : scene.getMesh(MeshID::fromSlang(instanceData.geometryID)).getTriangleCount();
 
             // Only mesh lights with basic materials are supported.
             auto pMaterial = scene.getMaterial(MaterialID::fromSlang( instanceData.materialID ))->toBasicMaterial();
@@ -192,7 +194,7 @@ namespace Falcor
                 // We've found a mesh instance with an emissive material => Setup mesh light data.
                 MeshLightData meshLight;
                 meshLight.instanceID = instanceID;
-                meshLight.triangleCount = meshData.getTriangleCount();
+                meshLight.triangleCount = triangleCount;
                 meshLight.triangleOffset = mTriangleCount;
                 meshLight.materialID = instanceData.materialID;
 

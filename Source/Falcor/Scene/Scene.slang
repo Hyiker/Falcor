@@ -286,14 +286,19 @@ struct Scene
     \param[in] use16Bit Flag indicating that the indices are stored in 16-bit format.
     \return Vertex indices local to the current mesh.
     */
-    uint3 getClusterLocalIndices(const uint ibOffset, const uint triangleIndex)
+    uint3 getClusterLocalIndices(const uint ibOffset, const uint triangleIndex, const bool use16Bit)
     {
+#if SCENE_HAS_16BIT_CLUSTER_INDICES
+        bool read16Bit = use16Bit;
+#else
+        bool read16Bit = false;
+#endif
         // Load the vertex indices.
         uint baseIndex = ibOffset * 4;
         uint3 vtxIndices;
 
-        baseIndex += triangleIndex * 12;
-        vtxIndices = clusterIndexData.Load3(baseIndex);
+        baseIndex += triangleIndex * 6;
+        vtxIndices = (uint3)clusterIndexData.Load<uint16_t3>(baseIndex);
         return vtxIndices;
     }
 
@@ -320,7 +325,7 @@ struct Scene
         const GeometryInstanceData instance = getGeometryInstance(instanceID);
         uint3 vtxIndices =
             instance.isNaniteMesh()
-                ? getClusterLocalIndices(instance.ibOffset, triangleIndex)
+                ? getClusterLocalIndices(instance.ibOffset, triangleIndex, instance.flags & uint(GeometryInstanceFlags::Use16BitIndices))
                 : getLocalIndices(instance.ibOffset, triangleIndex, instance.flags & uint(GeometryInstanceFlags::Use16BitIndices));
         vtxIndices += instance.vbOffset;
         return vtxIndices;

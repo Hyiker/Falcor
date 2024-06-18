@@ -10,10 +10,14 @@
 
 namespace Falcor
 {
+
 class Cluster
 {
 public:
-    static constexpr uint32_t kSize = 128; ///< The number of triangles in a cluster.
+    static constexpr uint32_t kMaxIndexSize = 256; ///< The maximum number of indices in a cluster.
+    static constexpr uint32_t kSize = 128;         ///< The number of triangles in a cluster. We seek to use 8-bit indices for
+                                                   ///< this size, considering the worst case, floor(256 / 3) = 85 triangles(Due
+                                                   ///< to the partition algorithm, we have to make it even smaller).
     Cluster() = default;
     /**
      * @brief Construct a Cluster.
@@ -65,10 +69,13 @@ public:
     /**
      * @brief Simply cluster with given desired triangle count.
      * The desired triangle count is not guaranteed to be met.
+     * If max error is set, the simplification will iterate until the target triangle count met or error exceed the threshold.
      * @param targetTriangleCount The target triangle count.
+     * @param targetError The target error.
+     * @param maxError The maximum error tolerance.
      * @return The error metric.
      */
-    float simplify(uint32_t targetTriangleCount, float targetError = 0.f, uint32_t maxTriangles = 0u);
+    float simplify(uint32_t targetTriangleCount, float targetError = 0.f, float maxError = 0.f);
 
     static Cluster merge(fstd::span<const Cluster> clusters);
 
@@ -88,6 +95,10 @@ public:
 
     auto getVertex(uint32_t vertexIndex) const { return mVertices[mIndices[vertexIndex]]; }
 
+    int getMipLevel() const { return mMipLevel; }
+
+    float getError() const { return mError; }
+
     void saveToFile(const std::filesystem::path& p) const;
 
     MaterialID materialID;
@@ -95,9 +106,9 @@ public:
 
     // Mesh flags
     bool isFrontFaceCW = false;
+    std::vector<uint32_t> children; ///< Children cluster indices
 private:
     uint64_t mGUID = 0ull; ///< Global unique cluster id
-
 
     // Mesh data
     std::vector<PackedStaticVertexData> mVertices;
@@ -114,6 +125,9 @@ private:
     // Bounding box
     AABB mBoundingBox;
 
+    int mMipLevel = 0;  ///< Cluster mip level, parents have higher mip levels
+    float mError = 0.f; ///< Cluster mip level error
+
     uint32_t mGroupIndex = std::numeric_limits<uint32_t>().max();
     uint32_t mGroupPartIndex = std::numeric_limits<uint32_t>().max();
 
@@ -126,6 +140,8 @@ struct ClusterGroup
     static constexpr uint32_t kMinSize = 8;
     static constexpr uint32_t kMaxSize = 32;
     static constexpr uint32_t kMaxChildren = 128;
+
+    int mipLevel = 0;
 
     Sphere bound;
     Sphere LODBound;

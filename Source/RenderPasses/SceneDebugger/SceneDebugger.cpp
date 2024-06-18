@@ -312,7 +312,28 @@ void SceneDebugger::renderPixelDataUI(Gui::Widgets& widget)
         }
 
         // Show mesh details.
-        if (!isNaniteMesh)
+        if (isNaniteMesh)
+        {
+            if (auto g = widget.group("Cluster info"); g.open())
+            {
+                FALCOR_ASSERT(data.geometryID < mpScene->getMeshCount());
+                const auto& cluster = mpScene->getCluster(ClusterID{data.geometryID});
+                const auto& clusterNode = mpScene->getClusterNode(ClusterID{data.geometryID});
+                std::string text;
+                text += fmt::format("flags: 0x{:08x}\n", cluster.flags);
+                text += fmt::format("materialID: {}\n", cluster.materialID);
+                text += fmt::format("vertexCount: {}\n", cluster.vertexCount);
+                text += fmt::format("indexCount: {}\n", cluster.indexCount);
+                text += fmt::format("triangleCount: {}\n", cluster.getTriangleCount());
+                text += fmt::format("vbOffset: {}\n", cluster.vbOffset);
+                text += fmt::format("ibOffset: {}\n", cluster.ibOffset);
+                text += fmt::format("isFrontFaceCW: {}\n", cluster.isFrontFaceCW());
+                text += fmt::format("mipLevel: {}\n", clusterNode.mipLevel);
+                text += fmt::format("error: {:g}\n", clusterNode.error);
+                g.text(text);
+            }
+        }
+        else
         {
             if (auto g = widget.group("Mesh info"); g.open())
             {

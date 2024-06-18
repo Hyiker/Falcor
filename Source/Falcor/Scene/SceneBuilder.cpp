@@ -207,6 +207,21 @@ std::vector<uint32_t> compact16BitIndices(const std::vector<uint32_t>& indices)
     return indexData;
 }
 
+std::vector<uint32_t> compact8BitIndices(const std::vector<uint32_t>& indices)
+{
+    if (indices.empty())
+        return {};
+    size_t sz = div_round_up(indices.size(), (std::size_t)4); // Storing 4 8-bit indices per dword.
+    std::vector<uint32_t> indexData(sz);
+    uint8_t* pIndices = reinterpret_cast<uint8_t*>(indexData.data());
+    for (size_t i = 0; i < indices.size(); i++)
+    {
+        FALCOR_ASSERT(indices[i] < (1u << 8));
+        pIndices[i] = static_cast<uint8_t>(indices[i]);
+    }
+    return indexData;
+}
+
 SceneCache::Key computeSceneCacheKey(const std::filesystem::path& path, SceneBuilder::Flags buildFlags)
 {
     SceneBuilder::Flags cacheFlags = buildFlags & (~(SceneBuilder::Flags::UseCache | SceneBuilder::Flags::RebuildCache));
@@ -2677,6 +2692,11 @@ void SceneBuilder::removeDuplicateMaterials()
             mesh.materialId = idMap[mesh.materialId.get()];
         }
 
+        for (auto& cluster : mSceneData.clusterDesc)
+        {
+            cluster.materialID = idMap[cluster.materialID].get();
+        }
+
         for (auto& curve : mCurves)
         {
             curve.materialId = idMap[curve.materialId.get()];
@@ -2988,6 +3008,7 @@ void SceneBuilder::createClusterInstanceData(uint32_t& tlasInstanceIndex)
         instance.vbOffset = cluster.vbOffset;
         instance.ibOffset = cluster.ibOffset;
         instance.flags |= (uint32_t)GeometryInstanceFlags::IsNaniteMesh;
+        instance.flags |= cluster.use16BitIndices() ? (uint32_t)GeometryInstanceFlags::Use16BitIndices : 0;
         instance.instanceIndex = tlasInstanceIndex++;
         instance.geometryIndex = 0;
         instanceData.push_back(instance);
@@ -3112,19 +3133,31 @@ void SceneBuilder::createNaniteData()
     auto& vertexData = mSceneData.clusterVertexData;
     auto& clusterDescs = mSceneData.clusterDesc;
     auto& clusterBBs = mSceneData.clusterBBs;
+    auto& clusterNodes = mSceneData.clusterNodes;
+    auto& clusterRoots = mSceneData.clusterRoots;
     uint32_t indexOffset = 0;
     uint32_t vertexOffset = 0;
 
+    clusterNodes.resize(clusters.size());
     clusterDescs.resize(clusters.size());
     clusterBBs.resize(clusters.size());
+
+    auto degrees = mpNaniteDataBuilder->computeDAGDegree();
+
     for (uint32_t i = 0; i < clusters.size(); i++)
     {
         // move buffers
         const auto& cluster = clusters[i];
         uint32_t indexCount = cluster.getIndexCount();
         uint32_t vertexCount = cluster.getVertexCount();
+        // D3D12 hardware BLAS builder doesn't support 8-bit indices
+        // TODO: Add support for 8-bit indices by using PLOC++
+        bool use8BitIndices = false;
+        auto compactedIndices = use8BitIndices ? compact8BitIndices(cluster.mIndices) : compact16BitIndices(cluster.mIndices);
+        uint32_t compactedIndexCount = (uint32_t)compactedIndices.size();
+
         indexData.insert(
-            indexData.end(), std::make_move_iterator(cluster.mIndices.begin()), std::make_move_iterator(cluster.mIndices.end())
+            indexData.end(), std::make_move_iterator(compactedIndices.begin()), std::make_move_iterator(compactedIndices.end())
         );
         vertexData.insert(
             vertexData.end(), std::make_move_iterator(cluster.mVertices.begin()), std::make_move_iterator(cluster.mVertices.end())
@@ -3136,13 +3169,37 @@ void SceneBuilder::createNaniteData()
         clusterDescs[i].indexCount = indexCount;
         clusterDescs[i].vertexCount = vertexCount;
         clusterDescs[i].materialID = cluster.materialID.getSlang();
-        clusterDescs[i].flags |= cluster.isFrontFaceCW ? (uint32_t)MeshFlags::IsFrontFaceCW : 0;
+        clusterDescs[i].flags |= cluster.isFrontFaceCW ? (uint32_t)MeshFlags::IsFrontFaceCW : 0u;
+        clusterDescs[i].flags |= !use8BitIndices ? (uint32_t)MeshFlags::Use16BitIndices : 0u;
+
+        FALCOR_CHECK(cluster.getVertexCount() < std::numeric_limits<uint16_t>::max(), "Nanite vertex count exceeds 16-bit limit.");
 
         clusterBBs[i] = cluster.getBounds();
 
-        indexOffset += indexCount;
+        clusterNodes[i].childrenCluster.resize(cluster.children.size());
+        std::transform(
+            cluster.children.begin(),
+            cluster.children.end(),
+            clusterNodes[i].childrenCluster.begin(),
+            [](uint32_t id) { return ClusterID(id); }
+        );
+        clusterNodes[i].error = cluster.getError();
+        clusterNodes[i].mipLevel = cluster.getMipLevel();
+
+        indexOffset += compactedIndexCount;
         vertexOffset += vertexCount;
+
+        if (degrees[i] == 0)
+        {
+            clusterRoots.emplace_back(i);
+        }
+
+        if (!use8BitIndices)
+        {
+            mSceneData.has16BitClusterIndices = true;
+        }
     }
+    mSceneData.clusterDAGDegrees = std::move(degrees);
 }
 
 FALCOR_SCRIPT_BINDING(SceneBuilder)

@@ -18,6 +18,10 @@ public:
      */
     void buildNaniteData(std::vector<MeshSpec>& meshList);
 
+    /** Compute the degree of the DAG nodes for traversal.
+     */
+    std::vector<uint32_t> computeDAGDegree();
+
 private:
     /**
      * @brief Cluster the triangles in a mesh.
@@ -50,12 +54,6 @@ private:
      * @param clusterRangeCount The count of the clusters.
      */
     void buildDAG(uint32_t clusterRangeStart, uint32_t clusterRangeCount);
-
-    /**
-     * @brief Build the coarse representation of original high precision meshes.
-     *
-     */
-    void buildCoarseRepresentation();
 
     /**
      * @brief Encode the Nanite meshes.

@@ -238,6 +238,11 @@ struct ClusterDesc
     {
         return (flags & (uint)MeshFlags::IsFrontFaceCW) != 0;
     }
+
+    bool use16BitIndices() CONST_FUNCTION
+    {
+        return (flags & (uint)MeshFlags::Use16BitIndices) != 0;
+    }
 };
 
 struct StaticVertexData

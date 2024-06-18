@@ -1,5 +1,6 @@
 #include <tbb/parallel_for.h>
 #include <tbb/concurrent_unordered_map.h>
+#include <tbb/concurrent_vector.h>
 #include <atomic>
 
 #include "NaniteDataBuilder.h"
@@ -40,6 +41,41 @@ void optimizeMesh(NaniteDataBuilder::MeshSpec& meshSpec)
     meshSpec.staticData = std::move(newVertexData);
 }
 
+std::vector<uint32_t> NaniteDataBuilder::computeDAGDegree()
+{
+    tbb::concurrent_vector<int> clusterDegree(mClusters.size(), 0);
+    std::vector<uint32_t> degree(mClusters.size());
+
+    constexpr int kParallelThreshold = 1024;
+    if (mClusters.size() >= kParallelThreshold)
+    {
+        tbb::parallel_for(
+            0u,
+            uint32_t(mClusters.size()),
+            [&](uint32_t clusterIndex)
+            {
+                for (uint32_t child : mClusters[clusterIndex].children)
+                {
+                    clusterDegree[child]++;
+                }
+            }
+        );
+    }
+    else
+    {
+        for (uint32_t clusterIndex = 0; clusterIndex < mClusters.size(); clusterIndex++)
+        {
+            for (uint32_t child : mClusters[clusterIndex].children)
+            {
+                clusterDegree[child]++;
+            }
+        }
+    }
+
+    std::copy(clusterDegree.begin(), clusterDegree.end(), degree.begin());
+    return degree;
+}
+
 void NaniteDataBuilder::buildNaniteData(std::vector<MeshSpec>& meshList)
 {
     // manually calculate the triangle count due to the existence of 16bit indices
@@ -68,7 +104,7 @@ void NaniteDataBuilder::buildNaniteData(std::vector<MeshSpec>& meshList)
 
     for (auto& staticMesh : staticMeshList)
     {
-        optimizeMesh(staticMesh);
+        // optimizeMesh(staticMesh);
         FALCOR_CHECK(staticMesh.indexOffset == 0, "MeshSpec::indexOffset is not zero");
         FALCOR_CHECK(staticMesh.staticVertexOffset == 0, "MeshSpec::staticVertexOffset is not zero");
 
@@ -82,13 +118,10 @@ void NaniteDataBuilder::buildNaniteData(std::vector<MeshSpec>& meshList)
     uint32_t clusterOffset = 0;
     for (uint32_t clusterSize : clusterCounts)
     {
-        // buildDAG(clusterOffset, clusterSize);
+        buildDAG(clusterOffset, clusterSize);
         clusterOffset += clusterSize;
     }
     report.measure("Build DAG");
-
-    buildCoarseRepresentation();
-    report.measure("Build coarse repr");
 
     encodeNaniteMeshes();
     report.measure("Encode Nanite meshes");
@@ -181,7 +214,7 @@ std::vector<Cluster> NaniteDataBuilder::clusterTriangles(
             edgeIndex,
             [&](uint32_t edgeIndex0, int edgeIndex1)
             {
-                FALCOR_CHECK(edgeIndex1 >= 0, "Invalid edge index");
+                FALCOR_ASSERT(edgeIndex1 >= 0);
                 if (edgeIndex0 > uint32_t(edgeIndex1))
                 {
                     disjointSet.unionSeq(edgeIndex0 / 3, edgeIndex1 / 3);
@@ -266,6 +299,7 @@ void NaniteDataBuilder::reduceDAG(std::atomic_uint32_t& clusterCount, fstd::span
     std::sort(mergeList.begin(), mergeList.end(), [](const Cluster* a, const Cluster* b) { return a->getGUID() < b->getGUID(); });
 
     auto merged = Cluster::merge(mergeList);
+    merged.children = {children.begin(), children.end()};
 
     int numParents = div_round_up(int(merged.mIndices.size()), int(Cluster::kSize * 6));
     int parentStart = 0;
@@ -276,9 +310,10 @@ void NaniteDataBuilder::reduceDAG(std::atomic_uint32_t& clusterCount, fstd::span
     for (int targetClusterSize = Cluster::kSize - 2; targetClusterSize > Cluster::kSize / 2; targetClusterSize -= 2)
     {
         int targetNumTris = numParents * targetClusterSize;
+        targetNumTris = targetNumTris;
 
         // Simplify merged cluster here
-        parentMaxLODError = merged.simplify(targetNumTris, 0.1f);
+        parentMaxLODError = merged.simplify(targetNumTris, 0.3f, 0.7f);
 
         if (numParents == 1)
         {
@@ -313,10 +348,12 @@ void NaniteDataBuilder::reduceDAG(std::atomic_uint32_t& clusterCount, fstd::span
 
             // Start over from scratch. Continuing from simplified cluster screws up ExternalEdges and LODError.
             merged = Cluster::merge(mergeList);
+            merged.children = {children.begin(), children.end()};
         }
     }
 
     ClusterGroup group;
+    group.mipLevel = merged.mMipLevel - 1;
 
     for (uint32_t child : children)
     {
@@ -359,6 +396,13 @@ void NaniteDataBuilder::buildDAG(uint32_t clusterRangeStart, uint32_t clusterRan
         fstd::span<Cluster> levelClusters(
             mClusters.data() + clusterLevelOffset, isFirstLevel ? clusterRangeCount : mClusters.size() - clusterLevelOffset
         );
+        // Resizing clusters will invalidate levelClusters, so we need to reassign it after resize.
+        auto resizeClusters = [&, clusterLevelOffset](uint32_t newSize)
+        {
+            mClusters.resize(newSize);
+            levelClusters =
+                fstd::span<Cluster>(mClusters.data() + clusterLevelOffset, isFirstLevel ? clusterRangeCount : newSize - clusterLevelOffset);
+        };
         isFirstLevel = false;
         uint32_t numExternalEdges = 0;
 
@@ -385,12 +429,12 @@ void NaniteDataBuilder::buildDAG(uint32_t clusterRangeStart, uint32_t clusterRan
             }
 
             clusterLevelOffset = mClusters.size();
-            mClusters.resize(mClusters.size() + maxParents);
-            mClusterGroups.resize(mClusterGroups.size() + 1);
+            resizeClusters(mClusters.size() + maxParents);
+            mClusterGroups.emplace_back();
 
             reduceDAG(clusterCount, children, mClusterGroups.size() - 1);
 
-            mClusters.resize(clusterCount);
+            resizeClusters(clusterCount);
 
             continue;
         }
@@ -515,9 +559,9 @@ void NaniteDataBuilder::buildDAG(uint32_t clusterRangeStart, uint32_t clusterRan
                 uint32_t otherClusterIndex = pair.first;
 
                 auto it = levelClusters[otherClusterIndex].mAdjacentClusters.find(clusterIndex);
-                FALCOR_CHECK(it != levelClusters[otherClusterIndex].mAdjacentClusters.end(), "Missing adjacency");
+                FALCOR_ASSERT(it != levelClusters[otherClusterIndex].mAdjacentClusters.end());
                 uint32_t count = it->second;
-                FALCOR_CHECK(count == pair.second, "Mismatched adjacency count");
+                FALCOR_ASSERT(count == pair.second);
 
                 if (clusterIndex > otherClusterIndex)
                 {
@@ -585,7 +629,7 @@ void NaniteDataBuilder::buildDAG(uint32_t clusterRangeStart, uint32_t clusterRan
         clusterLevelOffset = mClusters.size();
 
         const uint32_t parentsStartOffset = mClusters.size();
-        mClusters.resize(mClusters.size() + maxParents);
+        resizeClusters(mClusters.size() + maxParents);
         mClusterGroups.resize(mClusterGroups.size() + partitioner.mRanges.size());
 
         tbb::parallel_for(
@@ -611,7 +655,7 @@ void NaniteDataBuilder::buildDAG(uint32_t clusterRangeStart, uint32_t clusterRan
         );
 
         // Correct num to atomic count
-        mClusters.resize(clusterCount);
+        resizeClusters(clusterCount);
 
         // Force a deterministic order of the generated parent clusters
         {
@@ -628,31 +672,28 @@ void NaniteDataBuilder::buildDAG(uint32_t clusterRangeStart, uint32_t clusterRan
     }
 
     // Max out root node
-    uint32_t rootIndex = clusterLevelOffset;
+    FALCOR_ASSERT(mClusters.size() > 0, "No clusters found");
+    uint32_t rootIndex = std::min(clusterLevelOffset, uint32_t(mClusters.size() - 1));
     ClusterGroup rootClusterGroup{
-        Sphere(),   ///< Bounds
-        Sphere(),   ///< LODBounds
-        {rootIndex} ///< Children
+        mClusters[rootIndex].getMipLevel() + 1, ///< MipLevel
+        Sphere(),                               ///< Bounds
+        Sphere(),                               ///< LODBounds
+        {rootIndex}                             ///< Children
     };
     // RootClusterGroup.Children.Add(RootIndex);
     // RootClusterGroup.Bounds = Clusters[RootIndex].SphereBounds;
     // RootClusterGroup.LODBounds = FSphere3f(0);
     // RootClusterGroup.MaxParentLODError = 1e10f;
     // RootClusterGroup.MinLODError = -1.0f;
-    // RootClusterGroup.MipLevel = Clusters[RootIndex].MipLevel + 1;
     // RootClusterGroup.MeshIndex = MeshIndex;
     // RootClusterGroup.bTrimmed = false;
     mClusters[rootIndex].mGroupIndex = mClusterGroups.size();
     mClusterGroups.push_back(rootClusterGroup);
 }
 
-void NaniteDataBuilder::buildCoarseRepresentation()
-{
-    // Build the coarse representation of original high precision meshes.
-}
-
 void NaniteDataBuilder::encodeNaniteMeshes()
 {
     // Encode the Nanite meshes.
 }
+
 } // namespace Falcor
