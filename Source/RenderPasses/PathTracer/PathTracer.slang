@@ -1099,6 +1099,8 @@ struct PathTracer
         if (kUseNEE && !kUseMIS && isLastVertex && path.isLightSamplable())
             valid = false;
 
+        if (isLastVertex) valid = false;
+
         // Terminate caustics paths.
         if (kDisableCaustics && path.getBounces(BounceType::Diffuse) > 0 && path.isSpecular())
             valid = false;
