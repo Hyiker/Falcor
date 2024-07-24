@@ -116,6 +116,7 @@ namespace
     const std::string kMaxDiffuseBounces = "maxDiffuseBounces";
     const std::string kMaxSpecularBounces = "maxSpecularBounces";
     const std::string kMaxTransmissionBounces = "maxTransmissionBounces";
+    const std::string kUseShadow = "useShadow";
 
     const std::string kSampleGenerator = "sampleGenerator";
     const std::string kFixedSeed = "fixedSeed";
@@ -218,6 +219,7 @@ void PathTracer::parseProperties(const Properties& props)
         else if (key == kMaxDiffuseBounces) mStaticParams.maxDiffuseBounces = value;
         else if (key == kMaxSpecularBounces) mStaticParams.maxSpecularBounces = value;
         else if (key == kMaxTransmissionBounces) mStaticParams.maxTransmissionBounces = value;
+        else if (key == kUseShadow) mStaticParams.useShadow = value;
 
         // Sampling parameters
         else if (key == kSampleGenerator) mStaticParams.sampleGenerator = value;
@@ -343,6 +345,7 @@ Properties PathTracer::getProperties() const
     props[kMaxDiffuseBounces] = mStaticParams.maxDiffuseBounces;
     props[kMaxSpecularBounces] = mStaticParams.maxSpecularBounces;
     props[kMaxTransmissionBounces] = mStaticParams.maxTransmissionBounces;
+    props[kUseShadow] = mStaticParams.useShadow;
 
     // Sampling parameters
     props[kSampleGenerator] = mStaticParams.sampleGenerator;
@@ -536,6 +539,9 @@ bool PathTracer::renderRenderingUI(Gui::Widgets& widget)
 
     dirty |= widget.var("Max transmission bounces", mStaticParams.maxTransmissionBounces, 0u, kMaxBounces);
     widget.tooltip("Maximum number of transmission bounces.\n0 = no transmission\n1 = one transmission bounce etc.");
+
+
+    dirty |= widget.checkbox("Shadow casting", mStaticParams.useShadow);
 
     // Sampling options.
 
@@ -1402,6 +1408,7 @@ DefineList PathTracer::StaticParams::getDefines(const PathTracer& owner) const
     defines.add("MAX_DIFFUSE_BOUNCES", std::to_string(maxDiffuseBounces));
     defines.add("MAX_SPECULAR_BOUNCES", std::to_string(maxSpecularBounces));
     defines.add("MAX_TRANSMISSON_BOUNCES", std::to_string(maxTransmissionBounces));
+    defines.add("USE_SHADOW", useShadow ? "1" : "0");
     defines.add("ADJUST_SHADING_NORMALS", adjustShadingNormals ? "1" : "0");
     defines.add("USE_BSDF_SAMPLING", useBSDFSampling ? "1" : "0");
     defines.add("USE_NEE", useNEE ? "1" : "0");
