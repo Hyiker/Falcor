@@ -26,9 +26,11 @@
  # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  **************************************************************************/
 #pragma once
+#include <memory>
 #include "Falcor.h"
 #include "RenderGraph/RenderPass.h"
 #include "RenderGraph/RenderPassHelpers.h"
+#include "Rendering/Lights/LightCluster.h"
 #include "Utils/Debug/PixelDebug.h"
 #include "Utils/Sampling/SampleGenerator.h"
 #include "Rendering/Lights/LightBVHSampler.h"
@@ -121,6 +123,7 @@ private:
         uint32_t    maxSpecularBounces = 3;                     ///< Max number of specular bounces (0 = direct only), up to kMaxBounces.
         uint32_t    maxTransmissionBounces = 10;                ///< Max number of transmission bounces (0 = none), up to kMaxBounces.
         bool        useShadow = true;                           ///< Enable shadow ray.
+        bool        useLightCluster = true;                     ///< Enable light cluster shadowing.
 
         // Sampling parameters
         uint32_t    sampleGenerator = SAMPLE_GENERATOR_TINY_UNIFORM; ///< Pseudorandom sample generator type.
@@ -170,6 +173,7 @@ private:
     ref<SampleGenerator>            mpSampleGenerator;          ///< GPU pseudo-random sample generator.
     std::unique_ptr<EnvMapSampler>  mpEnvMapSampler;            ///< Environment map sampler or nullptr if not used.
     std::unique_ptr<EmissiveLightSampler> mpEmissiveSampler;    ///< Emissive light sampler or nullptr if not used.
+    std::unique_ptr<LightCluster>   mpLightCluster;             ///< Light cluster or nullptr if not used.
     std::unique_ptr<RTXDI>          mpRTXDI;                    ///< RTXDI sampler for direct illumination or nullptr if not used.
     std::unique_ptr<PixelStats>     mpPixelStats;               ///< Utility class for collecting pixel stats.
     std::unique_ptr<PixelDebug>     mpPixelDebug;               ///< Utility class for pixel debugging (print in shaders).

@@ -33,6 +33,8 @@ import Rendering.Materials.IsotropicGGX;
 import Rendering.Materials.InteriorListHelpers;
 import Rendering.Volumes.HomogeneousVolumeSampler;
 import Rendering.Utils.PixelStats;
+import Rendering.RTXDI.RTXDI;
+import Rendering.Lights.LightCluster;
 import RenderPasses.Shared.Denoising.NRDConstants;
 import RenderPasses.Shared.Denoising.NRDBuffers;
 import RenderPasses.Shared.Denoising.NRDData;
@@ -71,6 +73,9 @@ struct PathTracer
     // Samplers
     EnvMapSampler envMapSampler;          ///< Environment map sampler. Only valid when kUseEnvLight == true.
     EmissiveLightSampler emissiveSampler; ///< Emissive light sampler. Only valid when kUseEmissiveLights == true.
+
+    // Light clusters
+    LightCluster lightCluster; ///< Light cluster.
 
     // Inputs
     Texture2D<PackedHitInfo> vbuffer; ///< Fullscreen V-buffer for the primary hits.
@@ -619,12 +624,26 @@ struct PathTracer
         // Setup returned sample.
         ls.pdf = lightSample.pdf / lightCount;
         ls.Li = lightSample.Li * lightCount;
-        // Offset shading position to avoid self-intersection.
-        ls.origin = vertex.getRayOrigin(lightSample.dir);
         // Analytic lights do not currently have a geometric representation in the scene.
         // Do not worry about adjusting the ray length to avoid self-intersections at the light.
-        ls.distance = lightSample.distance;
-        ls.dir = lightSample.dir;
+
+        if (kUseLightCluster)
+        {
+            ClusterNode node = lightCluster.getNodeByLightIndex(lightIndex);
+
+            float3 toLight = node.origin - vertex.pos;
+            float distSqr = max(dot(toLight, toLight), kMinLightDistSqr);
+            ls.distance = sqrt(distSqr);
+            ls.dir = toLight / ls.distance;
+        }
+        else
+        {
+            ls.distance = lightSample.distance;
+            ls.dir = lightSample.dir;
+        }
+
+        // Offset shading position to avoid self-intersection.
+        ls.origin = vertex.getRayOrigin(ls.dir);
 
         return any(ls.Li > 0.f);
     }
@@ -1099,7 +1118,8 @@ struct PathTracer
         if (kUseNEE && !kUseMIS && isLastVertex && path.isLightSamplable())
             valid = false;
 
-        if (isLastVertex) valid = false;
+        if (isLastVertex)
+            valid = false;
 
         // Terminate caustics paths.
         if (kDisableCaustics && path.getBounces(BounceType::Diffuse) > 0 && path.isSpecular())

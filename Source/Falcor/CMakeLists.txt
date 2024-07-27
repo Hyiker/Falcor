@@ -215,6 +215,10 @@ target_sources(Falcor PRIVATE
     Rendering/Lights/LightBVHSampler.slang
     Rendering/Lights/LightBVHSamplerSharedDefinitions.slang
     Rendering/Lights/LightBVHTypes.slang
+    Rendering/Lights/LightCluster.cpp
+    Rendering/Lights/LightCluster.h
+    Rendering/Lights/LightCluster.slang
+    Rendering/Lights/LightClusterTypes.slang
     Rendering/Lights/LightHelpers.slang
 
     Rendering/Materials/AnisotropicGGX.slang
@@ -831,6 +835,7 @@ target_compile_options(Falcor
             /W4                             # increase warning level
             /wd4819                         # the file contains a character that cannot be represented in the current code page(936)
             /wd4251                         # 'type' : class 'type1' needs to have dll-interface to be used by clients of class 'type2'
+            /wd4819                         # The file contains a character that cannot be represented in the current code page(936)
             /wd4244                         # 'conversion' conversion from 'type1' to 'type2', possible loss of data
             /wd4267                         # 'var' : conversion from 'size_t' to 'type', possible loss of data
             /wd4100                         # unreferenced formal parameter

@@ -26,6 +26,11 @@
  # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  **************************************************************************/
 
+#pragma once
+#include "Utils/HostDeviceShared.slangh"
+
+BEGIN_NAMESPACE_FALCOR
+
 /**
  * Utility functions for Morton codes.
  * This is using the usual bit twiddling. See e.g.: https://fgiesen.wordpress.com/2009/12/13/decoding-morton-codes/
@@ -34,7 +39,6 @@
  * The deinterleave functions are named based on their input size in bits.
  * So, deinterleave_16bit(interleave_16bit(x)) == x should hold true.
  *
- * TODO: Make this a host/device shared header, ensure code compiles on the host.
  * TODO: Add optimized 8-bit and 2x8-bit interleaving functions.
  * TODO: Use NvApi intrinsics to optimize the code on NV.
  */
@@ -68,7 +72,7 @@ uint interleave_32bit(uint2 v)
  */
 uint interleave_16bit(uint2 v)
 {
-    v &= 0xff;
+    v = uint2(v.x & 0xff, v.y & 0xff);
     uint j = (v.y << 16) | v.x;      // j = ---- ---- (   y   ) ---- ---- (   x   )
                                      // j = ---- ---- fedc ba98 ---- ---- 7654 3210
     j = (j ^ (j << 4)) & 0x0f0f0f0f; // j = ---- fedc ---- ba98 ---- 7654 ---- 3210
@@ -116,10 +120,12 @@ uint2 deinterleave_8bit(uint i)
  */
 uint2 deinterleave_2x8bit(uint i)
 {
-    uint j = ((i & ~0x00010001) << 7) | i; // j = -(i1 >> 1)(  i1   ) -(i0 >> 1)(  i0   )
-    j &= 0x55555555;                       // j = -f-e -d-c -b-a -9-8 -7-6 -5-4 -3-2 -1-0
-    j = (j ^ (j >> 1)) & 0x33333333;       // j = --fe --dc --ba --98 --76 --54 --32 --10
-    j = (j ^ (j >> 2)) & 0x0f0f0f0f;       // j = ---- fedc ---- ba98 ---- 7654 ---- 3210
-    return uint2(j, j >> 8) & 0x000f000f;  // x = ---- ---- ---- ba98 ---- ---- ---- 3210
-                                           // y = ---- ---- ---- fedc ---- ---- ---- 7654
+    uint j = ((i & ~0x00010001) << 7) | i;               // j = -(i1 >> 1)(  i1   ) -(i0 >> 1)(  i0   )
+    j &= 0x55555555;                                     // j = -f-e -d-c -b-a -9-8 -7-6 -5-4 -3-2 -1-0
+    j = (j ^ (j >> 1)) & 0x33333333;                     // j = --fe --dc --ba --98 --76 --54 --32 --10
+    j = (j ^ (j >> 2)) & 0x0f0f0f0f;                     // j = ---- fedc ---- ba98 ---- 7654 ---- 3210
+    return uint2(j & 0x000f000f, (j >> 8) & 0x000f000f); // x = ---- ---- ---- ba98 ---- ---- ---- 3210
+                                                         // y = ---- ---- ---- fedc ---- ---- ---- 7654
 }
+
+END_NAMESPACE_FALCOR
