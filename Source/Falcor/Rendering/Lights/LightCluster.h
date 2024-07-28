@@ -48,9 +48,14 @@ public:
 
     bool update(RenderContext* pRenderContext);
 
+protected:
     void rebuildClusters(RenderContext* pRenderContext);
 
-protected:
+    using IndexedLight = std::pair<ref<Light>, uint32_t>;
+    /** Cluster lights using Minimal distance cluster, store the result in mNodes.
+     */
+    void minimalDistanceCluster(fstd::span<IndexedLight> lights, uint32_t lightOffset, float distanceTolerance);
+
     void finalize();
     void computeStats();
     void renderStats(Gui::Widgets& widget, const ClusterStats& stats) const;
@@ -78,8 +83,8 @@ protected:
     bool mNeedsRebuild = true;
 
     // GPU resources
-    ref<Buffer> mpClusterNodesBuffer;   ///< Buffer holding all cluster nodes.
-    ref<Buffer> mpLightIndicesBuffer;   ///< Light indices sorted by cluster node.
+    ref<Buffer> mpClusterNodesBuffer; ///< Buffer holding all cluster nodes.
+    ref<Buffer> mpLightIndicesBuffer; ///< Light indices sorted by cluster node, the first light should be representative light of cluster.
     ref<Buffer> mpClusterIndicesBuffer; ///< Cluster indices of each light source.
 };
 } // namespace Falcor

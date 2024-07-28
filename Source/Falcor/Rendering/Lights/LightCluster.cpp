@@ -1,4 +1,5 @@
 #include "LightCluster.h"
+#include <limits>
 
 #include "Core/API/Buffer.h"
 #include "Core/API/Formats.h"
@@ -7,6 +8,8 @@
 #include "Core/Program/ShaderVar.h"
 #include "Rendering/Lights/LightCluster.h"
 #include "Rendering/Lights/LightClusterTypes.slang"
+#include "Scene/Lights/Light.h"
+#include "Scene/Lights/LightData.slang"
 #include "Utils/Math/VectorMath.h"
 #include "Utils/Timing/Profiler.h"
 
@@ -62,10 +65,10 @@ bool LightCluster::update(RenderContext* pRenderContext)
 void LightCluster::rebuildClusters(RenderContext* pRenderContext)
 {
     const int kDesiredClusterCount = 300;
-    using IndexedLight = std::pair<ref<Light>, uint32_t>;
     uint32_t analyticLightCount = mpScene->getLightCount();
     const int kDesiredClusterSize = std::max(1, int(analyticLightCount) / kDesiredClusterCount);
     mNodes.clear();
+    const float sceneRadius = mpScene->getSceneBounds().radius();
 
     // Lights initialization.
     std::vector<IndexedLight> lights(analyticLightCount);
@@ -89,63 +92,8 @@ void LightCluster::rebuildClusters(RenderContext* pRenderContext)
         { return morton3D(l1.first->getData().posW) < morton3D(l2.first->getData().posW); }
     );
 
-    // Node cluster initialization.
-    std::vector<ClusterNode> nodes;
-    float averagePower = 0.0;
-    averagePower /= (float)nodes.size();
-    for (size_t i = 0; i < lights.size(); i++)
-    {
-        const auto& data = lights[i].first->getData();
-
-        ClusterNode node;
-        node.origin = data.posW;
-        node.extent = float3(0.0);
-        node.lightCount = 1;
-        node.lightOffset = i;
-        node.power = math::length(data.intensity);
-        averagePower += node.power;
-
-        nodes.push_back(node);
-    }
-    if (nodes.empty())
-    {
-        return;
-    }
-
-    const float sceneRadius = mpScene->getSceneBounds().radius();
-    const float kClusterDistanceToleranceMax = sceneRadius / 10.f * 4.f, kClusterDistanceToleranceMin = sceneRadius / 10.f * 3.f;
-
     // Greedy clustering
-    ClusterNode& cNode = nodes[0];
-    float nodeDistance = 0.0;
-    AABB nodeBB;
-    cNode.getAABB(nodeBB.minPoint, nodeBB.maxPoint);
-    for (size_t i = 1; i < nodes.size(); i++)
-    {
-        auto& node = nodes[i];
-
-        float d = math::length(cNode.origin - node.origin);
-        nodeDistance += d;
-        float avgDistance = nodeDistance / float(cNode.lightCount + 1);
-        if (!(avgDistance < kClusterDistanceToleranceMin ||
-              (cNode.lightCount <= (uint32_t)kDesiredClusterSize && avgDistance < kClusterDistanceToleranceMax)))
-        {
-            mNodes.push_back(cNode);
-            nodeDistance = 0.0f;
-            cNode = node;
-            cNode.getAABB(nodeBB.minPoint, nodeBB.maxPoint);
-            continue;
-        }
-
-        // Merge this node to cNode otherwise
-        nodeBB |= node.origin;
-        cNode.origin = nodeBB.center();
-        cNode.extent = nodeBB.extent() / 2.f;
-        cNode.lightCount++;
-        cNode.power += node.power;
-    }
-
-    mNodes.push_back(cNode);
+    minimalDistanceCluster(lights, 0, sceneRadius / 10.f);
 
     logInfo("LightCluster build {} clusters.", mNodes.size());
 
@@ -166,6 +114,86 @@ void LightCluster::rebuildClusters(RenderContext* pRenderContext)
     uploadCPUBuffers(lightIndices, clusterIndices);
 
     mIsValid = true;
+}
+
+void LightCluster::minimalDistanceCluster(fstd::span<IndexedLight> lights, uint32_t lightOffset, float distanceTolerance)
+{
+    FALCOR_ASSERT(!lights.empty());
+
+    if (lights.size() == 1)
+    {
+        return;
+    }
+    const auto& centerLight = lights[0].first->getData();
+    // Find the point have maximum distance from center.
+    auto distanceToCenter = [&centerLight](const LightData& l1) { return length(l1.posW - centerLight.posW); };
+    std::vector<IndexedLight> inside, outside;
+    inside.reserve(lights.size());
+    outside.reserve(lights.size());
+
+    inside.push_back(lights[0]);
+
+    // Cluster properties
+    AABB bounds;
+    uint32_t lightCount = 1;
+    float power = length(centerLight.intensity);
+    bounds |= centerLight.posW;
+
+    // New cluster center selection
+    float maxDist = -1.0;
+    int maxDistIdx = -1;
+
+    for (size_t i = 1; i < lights.size(); i++)
+    {
+        auto l = lights[i];
+        const auto& ld = l.first->getData();
+        float dist = distanceToCenter(ld);
+        if (dist > distanceTolerance)
+        {
+            if (dist > maxDist)
+            {
+                maxDist = dist;
+                maxDistIdx = (int)outside.size();
+            }
+            outside.push_back(l);
+        }
+        else
+        {
+            inside.push_back(l);
+            bounds |= ld.posW;
+            power += length(ld.intensity);
+            lightCount++;
+        }
+    }
+
+    inside.shrink_to_fit();
+    outside.shrink_to_fit();
+
+    // Swap the new center to idx 0 in outside
+    if (outside.size() >= 2)
+    {
+        std::swap(outside[maxDistIdx], outside[0]);
+    }
+
+    std::copy(inside.begin(), inside.end(), lights.begin());
+    std::copy(outside.begin(), outside.end(), lights.begin() + inside.size());
+
+    inside.clear();
+    outside.clear();
+
+    // Create new light cluster
+    ClusterNode node;
+    node.origin = bounds.center();
+    node.extent = bounds.extent() / 2.0f;
+    node.power = power;
+    node.lightCount = lightCount;
+    node.lightOffset = lightOffset;
+
+    mNodes.push_back(node);
+    if (maxDist >= 0)
+    {
+        minimalDistanceCluster(lights.subspan(lightCount, lights.size() - lightCount), lightOffset + lightCount, distanceTolerance);
+    }
 }
 
 void LightCluster::finalize()
