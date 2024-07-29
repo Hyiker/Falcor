@@ -43,6 +43,7 @@ static const uint kMaxDiffuseBounces = MAX_DIFFUSE_BOUNCES;
 static const uint kMaxSpecularBounces = MAX_SPECULAR_BOUNCES;
 static const uint kMaxTransmissionBounces = MAX_TRANSMISSON_BOUNCES;
 static const bool kUseShadow = USE_SHADOW;
+static const bool kShadowOnly = SHADOW_ONLY;
 static const bool kUseLightCluster = USE_LIGHT_CLUSTER;
 static const bool kAdjustShadingNormals = ADJUST_SHADING_NORMALS;
 static const bool kUseBSDFSampling = USE_BSDF_SAMPLING;

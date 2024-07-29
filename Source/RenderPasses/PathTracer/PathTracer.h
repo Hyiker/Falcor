@@ -123,7 +123,8 @@ private:
         uint32_t    maxSpecularBounces = 3;                     ///< Max number of specular bounces (0 = direct only), up to kMaxBounces.
         uint32_t    maxTransmissionBounces = 10;                ///< Max number of transmission bounces (0 = none), up to kMaxBounces.
         bool        useShadow = true;                           ///< Enable shadow ray.
-        bool        useLightCluster = true;                     ///< Enable light cluster shadowing.
+        bool        shadowOnly = false;                          ///< Only render shadow(visibility).
+        bool        useLightCluster = false;                    ///< Enable light cluster shadowing.
 
         // Sampling parameters
         uint32_t    sampleGenerator = SAMPLE_GENERATOR_TINY_UNIFORM; ///< Pseudorandom sample generator type.

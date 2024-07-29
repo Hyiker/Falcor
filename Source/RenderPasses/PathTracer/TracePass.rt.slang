@@ -76,7 +76,7 @@ struct PathPayload
         p.packed[3].xyz = asuint(path.thp);
         p.packed[3].w = path.bounceCounters;
 
-        p.packed[4].xyz = asuint(path.L);
+        p.packed[4].xyz = asuint(kShadowOnly ? float3(path.vis): path.L);
         p.packed[4].w = asuint(path.pdf);
 
         p.hit = path.hit.pack();
@@ -105,6 +105,7 @@ struct PathPayload
         path.bounceCounters = p.packed[3].w;
 
         path.L = asfloat(p.packed[4].xyz);
+        path.vis = asfloat(p.packed[4].x);
         path.pdf = asfloat(p.packed[4].w);
 
         path.hit = unpackHitInfo(p.hit);

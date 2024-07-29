@@ -127,59 +127,45 @@ void LightCluster::minimalDistanceCluster(fstd::span<IndexedLight> lights, uint3
     const auto& centerLight = lights[0].first->getData();
     // Find the point have maximum distance from center.
     auto distanceToCenter = [&centerLight](const LightData& l1) { return length(l1.posW - centerLight.posW); };
-    std::vector<IndexedLight> inside, outside;
-    inside.reserve(lights.size());
-    outside.reserve(lights.size());
 
-    inside.push_back(lights[0]);
-
+    // Reorder light array for cluster partition
+    auto isInsideCluster = [&](const IndexedLight& l) { return distanceToCenter(l.first->getData()) < distanceTolerance; };
+    auto clusterEnd = std::partition(lights.begin() + 1, lights.end(), isInsideCluster);
     // Cluster properties
     AABB bounds;
-    uint32_t lightCount = 1;
-    float power = length(centerLight.intensity);
-    bounds |= centerLight.posW;
+    float power = 0.0;
+    uint32_t lightCount = std::distance(lights.begin(), clusterEnd);
 
-    // New cluster center selection
-    float maxDist = -1.0;
-    int maxDistIdx = -1;
-
-    for (size_t i = 1; i < lights.size(); i++)
+    for (auto it = lights.begin(); it != clusterEnd; it++)
     {
-        auto l = lights[i];
-        const auto& ld = l.first->getData();
+        const auto& ld = it->first->getData();
+        bounds |= ld.posW;
+        power += length(ld.intensity);
+    }
+
+    // Find the new cluster center
+    float maxDist = -1.0;
+    auto maxIt = clusterEnd;
+    for (auto it = clusterEnd; it != lights.end(); it++)
+    {
+        const auto& ld = (*it).first->getData();
         float dist = distanceToCenter(ld);
         if (dist > distanceTolerance)
         {
             if (dist > maxDist)
             {
                 maxDist = dist;
-                maxDistIdx = (int)outside.size();
+                maxIt = it;
             }
-            outside.push_back(l);
-        }
-        else
-        {
-            inside.push_back(l);
-            bounds |= ld.posW;
-            power += length(ld.intensity);
-            lightCount++;
         }
     }
-
-    inside.shrink_to_fit();
-    outside.shrink_to_fit();
+    bool hasNewCluster = maxDist > 0;
 
     // Swap the new center to idx 0 in outside
-    if (outside.size() >= 2)
+    if (hasNewCluster)
     {
-        std::swap(outside[maxDistIdx], outside[0]);
+        std::iter_swap(clusterEnd, maxIt);
     }
-
-    std::copy(inside.begin(), inside.end(), lights.begin());
-    std::copy(outside.begin(), outside.end(), lights.begin() + inside.size());
-
-    inside.clear();
-    outside.clear();
 
     // Create new light cluster
     ClusterNode node;

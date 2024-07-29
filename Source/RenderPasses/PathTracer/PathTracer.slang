@@ -364,6 +364,15 @@ struct PathTracer
     */
     void addToPathContribution(inout PathState path, const float3 radiance) { path.L += path.thp * radiance; }
 
+    /** Update the path throughouput.
+        \param[in,out] path Path state.
+        \param[in] weight Vertex throughput.
+    */
+    void updatePathVisibilityThroughput(inout PathState path, float visibility)
+    {
+        path.vis += visibility;
+    }
+
     /** Generates a new scatter ray using BSDF importance sampling.
         \param[in] sd Shading data.
         \param[in] mi Material instance at the shading point.
@@ -1033,7 +1042,8 @@ struct PathTracer
 
                 float3 weight = mi.eval(sd, ls.dir, path.sg);
                 float3 Lr = weight * ls.Li;
-                if (any(Lr > 0.f))
+                // If render in shadow visibility mode, shadow ray will be traced even if Lr == 0.0
+                if (any(Lr > 0.f) || kShadowOnly)
                 {
                     if (kUseShadow)
                     {
@@ -1054,10 +1064,12 @@ struct PathTracer
                         bool visible = vq.traceVisibilityRay(ray);
                         if (visible)
                             addToPathContribution(path, Lr);
+                        updatePathVisibilityThroughput(path, visible ? 1.0 : 0.0);
                     }
                     else
                     {
                         addToPathContribution(path, Lr);
+                        updatePathVisibilityThroughput(path, 1.0);
                     }
                 }
             }
@@ -1250,7 +1262,8 @@ struct PathTracer
      */
     void writeOutput(const PathState path)
     {
-        assert(!any(isnan(path.L)));
+        float3 sample = kShadowOnly ? float3(path.vis) : path.L;
+        assert(!any(isnan(sample)));
 
         // Log path length.
         logPathLength(getTerminatedPathLength(path));
@@ -1261,12 +1274,12 @@ struct PathTracer
         if (kSamplesPerPixel == 1)
         {
             // Write color directly to frame buffer.
-            outputColor[pixel] = float4(path.L, 1.f);
+            outputColor[pixel] = float4(sample, 1.f);
         }
         else
         {
             // Write color to per-sample buffer.
-            sampleColor[outIdx].set(path.L);
+            sampleColor[outIdx].set(sample);
         }
 
         if (kOutputGuideData)
@@ -1290,7 +1303,7 @@ struct PathTracer
             else
                 data.setPathType(NRDPathType::Residual);
 
-            data.setRadiance(path.L);
+            data.setRadiance(sample);
 
             outputNRD.sampleRadiance[outIdx] = data;
         }

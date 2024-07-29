@@ -159,6 +159,7 @@ const std::string kMaxDiffuseBounces = "maxDiffuseBounces";
 const std::string kMaxSpecularBounces = "maxSpecularBounces";
 const std::string kMaxTransmissionBounces = "maxTransmissionBounces";
 const std::string kUseShadow = "useShadow";
+const std::string kShadowOnly = "shadowOnly";
 const std::string kUseLightCluster = "useLightCluster";
 
 const std::string kSampleGenerator = "sampleGenerator";
@@ -270,6 +271,8 @@ void PathTracer::parseProperties(const Properties& props)
             mStaticParams.maxTransmissionBounces = value;
         else if (key == kUseShadow)
             mStaticParams.useShadow = value;
+        else if (key == kShadowOnly)
+            mStaticParams.shadowOnly = value;
         else if (key == kUseLightCluster)
             mStaticParams.useLightCluster = value;
 
@@ -437,6 +440,7 @@ Properties PathTracer::getProperties() const
     props[kMaxSpecularBounces] = mStaticParams.maxSpecularBounces;
     props[kMaxTransmissionBounces] = mStaticParams.maxTransmissionBounces;
     props[kUseShadow] = mStaticParams.useShadow;
+    props[kShadowOnly] = mStaticParams.shadowOnly;
     props[kUseLightCluster] = mStaticParams.useLightCluster;
 
     // Sampling parameters
@@ -643,6 +647,7 @@ bool PathTracer::renderRenderingUI(Gui::Widgets& widget)
     dirty |= widget.var("Max transmission bounces", mStaticParams.maxTransmissionBounces, 0u, kMaxBounces);
     widget.tooltip("Maximum number of transmission bounces.\n0 = no transmission\n1 = one transmission bounce etc.");
 
+    dirty |= widget.checkbox("Shadow only render", mStaticParams.shadowOnly);
     dirty |= widget.checkbox("Shadow casting", mStaticParams.useShadow);
 
     // Sampling options.
@@ -1649,6 +1654,7 @@ DefineList PathTracer::StaticParams::getDefines(const PathTracer& owner) const
     defines.add("MAX_DIFFUSE_BOUNCES", std::to_string(maxDiffuseBounces));
     defines.add("MAX_SPECULAR_BOUNCES", std::to_string(maxSpecularBounces));
     defines.add("MAX_TRANSMISSON_BOUNCES", std::to_string(maxTransmissionBounces));
+    defines.add("SHADOW_ONLY", shadowOnly ? "1" : "0");
     defines.add("USE_SHADOW", useShadow ? "1" : "0");
     defines.add("USE_LIGHT_CLUSTER", useLightCluster ? "1" : "0");
     defines.add("ADJUST_SHADING_NORMALS", adjustShadingNormals ? "1" : "0");
