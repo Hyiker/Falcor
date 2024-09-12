@@ -13,12 +13,12 @@ static_assert(sizeof(VPLData) % 16 == 0, "VPLData struct should be 16-byte align
 const std::string kCreateVPLPassFilename = "RenderPasses/VPLGenPass/CreateVPL.cs.slang";
 
 // Scripting options.
-const std::string kPathsPerLight = "pathsPerLight";
-const std::string kMaxPathLength = "maxPathLength";
+const std::string kMaxVPLCount = "maxVPLCount";
+const std::string kMaxPathDepth = "maxPathDepth";
 
 // VPL configuration limits.
-static const uint32_t kMaxPathPerLight = 1024u;
-static const uint32_t kMaxPathBounces = 8u;
+static const uint32_t kMaxVPLCountLimit = 1000u;
+static const uint32_t kMaxPathDepthLimit = 12u;
 
 // Outputs
 const std::string kVPLBuffer = "gVPL";
@@ -37,16 +37,19 @@ VPLGenPass::VPLGenPass(ref<Device> pDevice, const Properties& props) : RenderPas
 
     // Create sample generator.
     mpSampleGenerator = SampleGenerator::create(mpDevice, SAMPLE_GENERATOR_DEFAULT);
+
+    mpCounterBuffer = mpDevice->createBuffer(sizeof(uint32_t));
+    mpCounterStagingBuffer = mpDevice->createBuffer(sizeof(uint32_t), ResourceBindFlags::None, MemoryType::ReadBack, nullptr);
 }
 
 void VPLGenPass::parseProperties(const Properties& props)
 {
     for (const auto& [key, value] : props)
     {
-        if (key == kPathsPerLight)
-            mParams.pathsPerLight = value;
-        else if (key == kMaxPathLength)
-            mParams.maxPathLength = value;
+        if (key == kMaxVPLCount)
+            mParams.maxVPLCount = value;
+        else if (key == kMaxPathDepth)
+            mParams.maxPathDepth = value;
         else
             logWarning("Unknown property '{}' in VPLGenPass properties.", key);
     }
@@ -56,8 +59,8 @@ Properties VPLGenPass::getProperties() const
 {
     Properties props;
 
-    props[kPathsPerLight] = mParams.pathsPerLight;
-    props[kMaxPathLength] = mParams.maxPathLength;
+    props[kMaxPathDepth] = mParams.maxPathDepth;
+    props[kMaxVPLCount] = mParams.maxVPLCount;
 
     return props;
 }
@@ -67,8 +70,7 @@ RenderPassReflection VPLGenPass::reflect(const CompileData& compileData)
     RenderPassReflection reflector;
 
     // Max sample per path = max path bounces + 2(starting point and ending point (if exists))
-    uint32_t maxSamples = kMaxPathPerLight * (kMaxPathBounces + 2u);
-    reflector.addOutput("gVPL", "Virtual point light(VPL) data").rawBuffer(maxSamples * sizeof(VPLData));
+    reflector.addOutput("gVPL", "Virtual point light(VPL) data").rawBuffer(kMaxVPLCountLimit * sizeof(VPLData));
 
     addRenderPassOutputs(reflector, {kOutputChannel});
 
@@ -97,6 +99,11 @@ void VPLGenPass::execute(RenderContext* pRenderContext, const RenderData& render
         recreatePrograms();
     }
 
+    if (mpScene->getRenderSettings().useEmissiveLights)
+    {
+        mpScene->getLightCollection(pRenderContext);
+    }
+
     auto& dict = renderData.getDictionary();
 
     // Update refresh flag if changes that affect the output have occured.
@@ -105,6 +112,7 @@ void VPLGenPass::execute(RenderContext* pRenderContext, const RenderData& render
         auto flags = dict.getValue(kRenderPassRefreshFlags, Falcor::RenderPassRefreshFlags::None);
         flags |= Falcor::RenderPassRefreshFlags::RenderOptionsChanged;
         dict[Falcor::kRenderPassRefreshFlags] = flags;
+        recreatePrograms();
         mOptionsChanged = false;
     }
 
@@ -130,9 +138,11 @@ void VPLGenPass::renderUI(Gui::Widgets& widget)
 {
     bool dirty = false;
 
-    dirty |= widget.var("Paths/light", mParams.pathsPerLight, 1u, 1024u);
+    dirty |= widget.var("Max VPL count", mParams.maxVPLCount, 1u, 1024u);
 
-    dirty |= widget.var("Max path length", mParams.maxPathLength, 1u, 8u);
+    dirty |= widget.var("Max path depth", mParams.maxPathDepth, 1u, 8u);
+
+    widget.text(fmt::format("VPL Count = {}", mVPLCount));
 
     if (dirty)
     {
@@ -147,9 +157,9 @@ void VPLGenPass::recreatePrograms()
 
 void VPLGenPass::executeCreatePass(RenderContext* pRenderContext, const RenderData& renderData)
 {
-    FALCOR_PROFILE(pRenderContext, "VPL Create Pass");
-
     FALCOR_ASSERT(mpScene);
+
+    FALCOR_PROFILE(pRenderContext, "VPL Create Pass");
 
     if (!mpCreateVPLPass)
     {
@@ -157,8 +167,8 @@ void VPLGenPass::executeCreatePass(RenderContext* pRenderContext, const RenderDa
         defines.add(mpScene->getSceneDefines());
         defines.add(mpSampleGenerator->getDefines());
 
-        defines.add("PATHS_PER_LIGHT", std::to_string(mParams.pathsPerLight));
-        defines.add("MAX_PATH_LENGTH", std::to_string(mParams.maxPathLength));
+        defines.add("MAX_VPL_COUNT", std::to_string(mParams.maxVPLCount));
+        defines.add("MAX_PATH_DEPTH", std::to_string(mParams.maxPathDepth));
 
         ProgramDesc baseDesc;
         baseDesc.addShaderModules(mpScene->getShaderModules());
@@ -174,11 +184,23 @@ void VPLGenPass::executeCreatePass(RenderContext* pRenderContext, const RenderDa
         mpSampleGenerator->bindShaderData(var);
     }
 
+    pRenderContext->clearUAV(mpCounterBuffer->getUAV().get(), uint4(0));
+
     ShaderVar var = mpCreateVPLPass->getRootVar();
 
-    var[kOutputChannel.texname] = renderData.getTexture(kOutputChannel.desc);
+    var[kOutputChannel.texname] = renderData.getTexture(kOutputChannel.name);
     var[kVPLBuffer] = static_ref_cast<Buffer>(renderData.getResource(kVPLBufferDesc));
+    var["counter"] = mpCounterBuffer;
 
     // Compute dispatch
-    mpCreateVPLPass->execute(pRenderContext, uint3(1, 1, 1));
+    uint32_t dispatchDim = mParams.maxVPLCount / (mParams.maxPathDepth) * 1.1;
+    mpCreateVPLPass->execute(pRenderContext, uint3(dispatchDim, 1, 1));
+
+    pRenderContext->submit(true);
+
+    mVPLCount = *reinterpret_cast<const uint32_t*>(mpCounterStagingBuffer->map());
+    mpCounterStagingBuffer->unmap();
+    FALCOR_ASSERT(mVPLCount <= mParams.maxVPLCount);
+
+    pRenderContext->copyResource(mpCounterStagingBuffer.get(), mpCounterBuffer.get());
 }

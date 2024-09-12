@@ -26,8 +26,8 @@ public:
 private:
     struct Params
     {
-        uint32_t pathsPerLight = 1; ///< Number of Paths generated per light.
-        uint32_t maxPathLength = 1; ///< Maximum path length for each path(Some may be early-terminated).
+        uint32_t maxVPLCount = 100u; ///< Maximum VPL count in total.
+        uint32_t maxPathDepth = 5u;  ///< Maximum path depth for each path(Some may be early-terminated).
     };
 
     void parseProperties(const Properties& props);
@@ -38,10 +38,18 @@ private:
     // Configuration
     Params mParams; ///< VPL generate params.
 
+    // Internal state
     ref<Scene> mpScene;                     ///< Current scene
     ref<SampleGenerator> mpSampleGenerator; ///< GPU pseudo-random sample generator.
 
+    // GPU buffer
+    ref<Buffer> mpCounterBuffer;
+    ref<Buffer> mpCounterStagingBuffer;
+
     ref<ComputePass> mpCreateVPLPass;
+
+    // CPU statistics
+    uint32_t mVPLCount;
 
     bool mOptionsChanged = false;
 };
