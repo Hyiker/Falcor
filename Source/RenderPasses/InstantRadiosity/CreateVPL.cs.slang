@@ -59,7 +59,7 @@ bool sampleTriangle(const uint triangleIndex, const float2 u, out LightSample ls
     v.texC = uv;
     v.faceNormalW = ls.normW;
 
-    sd = gScene.materials.prepareShadingData(v, tri.materialID, float3(0.0), ExplicitLodTextureSampler(0.f));
+    sd = gScene.materials.prepareShadingData(v, tri.materialID, ls.normW, ExplicitLodTextureSampler(0.f));
 
     return true;
 }
@@ -187,24 +187,25 @@ struct ScatterRayData
 bool generateScatterRay(
     const ShadingData sd,
     const IMaterialInstance mi,
-    bool applyBSDFWeight,
     inout SampleGenerator sg,
     inout LightSample ls,
+    out float3 bsdfVal,
     out Ray ray
 )
 {
+    bsdfVal = float3(0.0);
     ray = {};
     // Sample material.
-    BSDFSample bsdfSample;
+    BSDFSample bsdfSample = {};
     if (mi.sample(sd, sg, bsdfSample, true))
     {
         ls.dir = bsdfSample.wo;
-        ls.Li *= applyBSDFWeight ? bsdfSample.weight : 1.f;
+        bsdfVal = bsdfSample.weight;
 
         // Offset ray origin to avoid self-intersection
         ray = Ray(sd.computeRayOrigin(), ls.dir);
 
-        return any(ls.Li > 0.f);
+        return true;
     }
 
     return false;
@@ -231,7 +232,7 @@ void execute(uint id)
 
     // Actual VPL count = depth + 2(light source + ending point)
     uint depth = 1;
-    int retry = 20;
+    int retry = 50;
 
     // Do very first light sampling
     LightSample ls;
@@ -243,11 +244,16 @@ void execute(uint id)
         return;
 
     Ray ray;
+    float3 weight;
     while (depth <= kMaxPathDepth && retry > 0)
     {
         // Generate scattering ray
-        if (!generateScatterRay(sd, gScene.materials.getMaterialInstance(sd, ExplicitLodTextureSampler(0.f)), depth == 1, sg, ls, ray))
-            break;
+        if (!generateScatterRay(sd, gScene.materials.getMaterialInstance(sd, ExplicitLodTextureSampler(0.f)), sg, ls, weight, ray))
+        {
+            if (retry-- <= 0)
+                break;
+            continue;
+        }
 
         // Trace ray
         SceneRayQuery<kUseAlphaTest> sceneRayQuery;
@@ -261,15 +267,16 @@ void execute(uint id)
         }
 
         handleHit(hit, ray, ls, sd);
+        ls.Li *= weight;
 
-        if (!addVPL(ls))
+        if (all(ls.Li <= 0.0) || !addVPL(ls))
             break;
 
         depth++;
     }
 }
 
-[numthreads(16, 16, 1)]
+[numthreads(16, 1, 1)]
 void main(uint3 dispatchThreadId: SV_DispatchThreadID)
 {
     execute(dispatchThreadId.x);

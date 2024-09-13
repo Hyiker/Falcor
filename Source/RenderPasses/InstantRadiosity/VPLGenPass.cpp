@@ -1,16 +1,12 @@
 #include "VPLGenPass.h"
 #include "RenderGraph/RenderPassHelpers.h"
 #include "RenderGraph/RenderPassStandardFlags.h"
-#include "VPLData.slang"
 
 using namespace Falcor;
 
 namespace
 {
-
-static_assert(sizeof(VPLData) % 16 == 0, "VPLData struct should be 16-byte aligned.");
-
-const std::string kCreateVPLPassFilename = "RenderPasses/VPLGenPass/CreateVPL.cs.slang";
+const std::string kCreateVPLPassFilename = "RenderPasses/InstantRadiosity/CreateVPL.cs.slang";
 
 // Scripting options.
 const std::string kMaxVPLCount = "maxVPLCount";
@@ -25,11 +21,6 @@ const std::string kVPLBuffer = "gVPL";
 const std::string kVPLBufferDesc = "VPL data buffer";
 const ChannelDesc kOutputChannel{"output", "gOutput", "An output to ensure VPLGenPass being executed", false, ResourceFormat::RGBA32Float};
 } // namespace
-
-extern "C" FALCOR_API_EXPORT void registerPlugin(Falcor::PluginRegistry& registry)
-{
-    registry.registerClass<RenderPass, VPLGenPass>();
-}
 
 VPLGenPass::VPLGenPass(ref<Device> pDevice, const Properties& props) : RenderPass(pDevice)
 {
@@ -70,7 +61,7 @@ RenderPassReflection VPLGenPass::reflect(const CompileData& compileData)
     RenderPassReflection reflector;
 
     // Max sample per path = max path bounces + 2(starting point and ending point (if exists))
-    reflector.addOutput("gVPL", "Virtual point light(VPL) data").rawBuffer(kMaxVPLCountLimit * sizeof(VPLData));
+    reflector.addOutput("vpl", "Virtual point light(VPL) data").rawBuffer(kMaxVPLCountLimit * sizeof(VPLData));
 
     addRenderPassOutputs(reflector, {kOutputChannel});
 
@@ -189,18 +180,21 @@ void VPLGenPass::executeCreatePass(RenderContext* pRenderContext, const RenderDa
     ShaderVar var = mpCreateVPLPass->getRootVar();
 
     var[kOutputChannel.texname] = renderData.getTexture(kOutputChannel.name);
-    var[kVPLBuffer] = static_ref_cast<Buffer>(renderData.getResource(kVPLBufferDesc));
+    var[kVPLBuffer] = static_ref_cast<Buffer>(renderData.getResource("vpl"));
     var["counter"] = mpCounterBuffer;
 
     // Compute dispatch
-    uint32_t dispatchDim = mParams.maxVPLCount / (mParams.maxPathDepth) * 1.1;
-    mpCreateVPLPass->execute(pRenderContext, uint3(dispatchDim, 1, 1));
+    uint32_t dispatchDim = mParams.maxVPLCount / (mParams.maxPathDepth);
+    do
+    {
+        mpCreateVPLPass->execute(pRenderContext, uint3(dispatchDim, 1, 1));
 
-    pRenderContext->submit(true);
+        pRenderContext->submit(true);
 
-    mVPLCount = *reinterpret_cast<const uint32_t*>(mpCounterStagingBuffer->map());
-    mpCounterStagingBuffer->unmap();
-    FALCOR_ASSERT(mVPLCount <= mParams.maxVPLCount);
+        mVPLCount = *reinterpret_cast<const uint32_t*>(mpCounterStagingBuffer->map());
+        mpCounterStagingBuffer->unmap();
+        FALCOR_ASSERT(mVPLCount <= mParams.maxVPLCount);
 
-    pRenderContext->copyResource(mpCounterStagingBuffer.get(), mpCounterBuffer.get());
+        pRenderContext->copyResource(mpCounterStagingBuffer.get(), mpCounterBuffer.get());
+    } while (mVPLCount < mParams.maxVPLCount);
 }
