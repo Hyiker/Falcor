@@ -1,8 +1,7 @@
 #include "IRShadingPass.h"
-#include "IRShadingPass.h"
+#include "InstantRadiosity.h"
 #include "RenderGraph/RenderPassHelpers.h"
 #include "RenderGraph/RenderPassStandardFlags.h"
-#include "VPLData.slang"
 
 using namespace Falcor;
 
@@ -13,9 +12,11 @@ const std::string kIRShadingPassFilename = "RenderPasses/InstantRadiosity/IRShad
 // Scripting options.
 const std::string kClamping = "clamping";
 const std::string kVisualizeVPL = "visualizeVPL";
+const std::string kVPLSamples = "vplSamples";
 
 // Inputs
-const std::string kVPLBufferDesc = "VPL data buffer";
+const std::string kVPLBuffer = "gVPL";
+const std::string kVPLCounterBuffer = "gVPLCounter";
 const Falcor::ChannelList kInputChannels = {
     {"viewW", "gView", "World-space view direction (xyz float format)", false, ResourceFormat::RGBA32Float},
     {"posW", "gPosW", "World-space position (xyz float format)", false, ResourceFormat::RGBA32Float},
@@ -35,6 +36,9 @@ const Falcor::ChannelList kOutputChannels = {
 IRShadingPass::IRShadingPass(ref<Device> pDevice, const Properties& props) : RenderPass(pDevice)
 {
     parseProperties(props);
+
+    // Create sample generator.
+    mpSampleGenerator = SampleGenerator::create(mpDevice, SAMPLE_GENERATOR_DEFAULT);
 }
 
 void IRShadingPass::parseProperties(const Properties& props)
@@ -45,6 +49,8 @@ void IRShadingPass::parseProperties(const Properties& props)
             mParams.clamping = value;
         else if (key == kVisualizeVPL)
             mParams.visualizeVPL = value;
+        else if (key == kVPLSamples)
+            mParams.vplSamples = value;
         else
             logWarning("Unknown property '{}' in IRShadingPass properties.", key);
     }
@@ -55,6 +61,8 @@ Properties IRShadingPass::getProperties() const
     Properties props;
 
     props[kClamping] = mParams.clamping;
+    props[kVisualizeVPL] = mParams.visualizeVPL;
+    props[kVPLSamples] = mParams.vplSamples;
     return props;
 }
 
@@ -64,7 +72,8 @@ RenderPassReflection IRShadingPass::reflect(const CompileData& compileData)
 
     addRenderPassInputs(reflector, kInputChannels);
     // Max sample per path = max path bounces + 2(starting point and ending point (if exists))
-    reflector.addInput("vpl", "Virtual point light(VPL) data").rawBuffer(1000u * sizeof(VPLData));
+    reflector.addInput("vpl", "Virtual point light(VPL) data").rawBuffer(kMaxVPLCountLimit * sizeof(VPLData));
+    reflector.addInput("vplCounter", "Virtual point light(VPL) data").rawBuffer(sizeof(uint32_t));
 
     addRenderPassOutputs(reflector, kOutputChannels);
 
@@ -118,6 +127,8 @@ void IRShadingPass::renderUI(Gui::Widgets& widget)
 
     dirty |= widget.var("Clamping", mParams.clamping, 0.0f, 1.0f);
 
+    dirty |= widget.var("VPL samples", mParams.vplSamples, 0u, kMaxVPLCountLimit);
+
     dirty |= widget.checkbox("Visualize VPL", mParams.visualizeVPL);
 
     if (dirty)
@@ -136,9 +147,11 @@ void IRShadingPass::executeShadingPass(RenderContext* pRenderContext, const Rend
     {
         DefineList defines;
         defines.add(mpScene->getSceneDefines());
+        defines.add(mpSampleGenerator->getDefines());
 
         defines.add("CLAMPING", std::to_string(mParams.clamping));
         defines.add("VISUALIZE_VPL", mParams.visualizeVPL ? "1" : "0");
+        defines.add("VPL_SAMPLES", std::to_string(mParams.vplSamples));
 
         ProgramDesc baseDesc;
         baseDesc.addShaderModules(mpScene->getShaderModules());
@@ -149,7 +162,10 @@ void IRShadingPass::executeShadingPass(RenderContext* pRenderContext, const Rend
         mpShadingPass = ComputePass::create(mpDevice, desc, defines, true);
 
         // Bind static resources.
-        mpScene->setRaytracingShaderData(pRenderContext, mpShadingPass->getRootVar());
+        auto var = mpShadingPass->getRootVar();
+        mpScene->setRaytracingShaderData(pRenderContext, var);
+        mpSampleGenerator->bindShaderData(var);
+        mFrameCount = 0;
     }
 
     ShaderVar var = mpShadingPass->getRootVar();
@@ -167,9 +183,12 @@ void IRShadingPass::executeShadingPass(RenderContext* pRenderContext, const Rend
         bind(channel);
     for (auto channel : kOutputChannels)
         bind(channel);
-    var["gVPL"] = static_ref_cast<Buffer>(renderData.getResource("vpl"));
+    var[kVPLBuffer] = static_ref_cast<Buffer>(renderData.getResource("vpl"));
+    var[kVPLCounterBuffer] = static_ref_cast<Buffer>(renderData.getResource("vplCounter"));
+    const uint2 targetDim = renderData.getDefaultTextureDims();
+    var["CB"]["frameDim"] = targetDim;
+    var["CB"]["frameCount"] = mFrameCount++;
 
     // Compute dispatch
-    const uint2 targetDim = renderData.getDefaultTextureDims();
     mpShadingPass->execute(pRenderContext, uint3(targetDim, 1));
 }

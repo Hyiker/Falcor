@@ -13,7 +13,7 @@ import VPLData;
 // Outputs
 RWStructuredBuffer<VPLData> gVPL;
 RWTexture2D<float4> gOutput;
-RWByteAddressBuffer counter;
+RWByteAddressBuffer gVPLCounter;
 
 // Static configurations
 static const uint kMaxPathDepth = MAX_PATH_DEPTH;
@@ -25,7 +25,6 @@ struct LightSample
     float3 Li;    ///< Incident radiance, not divided by pdf.
     float3 posW;  ///< World space position.
     float3 normW; ///< World space normal.
-    float3 dir;   ///< Next bounce light direction.
 };
 
 bool sampleTriangle(const uint triangleIndex, const float2 u, out LightSample ls, out ShadingData sd)
@@ -55,7 +54,7 @@ bool sampleTriangle(const uint triangleIndex, const float2 u, out LightSample ls
     v.posW = ls.posW;
     v.normalW = ls.normW;
     // Here we compute a random direction
-    v.tangentW = float4(normalize(tri.posW[0] - ls.posW), 1.0);
+    v.tangentW = float4(0.0);
     v.texC = uv;
     v.faceNormalW = ls.normW;
 
@@ -79,14 +78,13 @@ bool sampleLight(inout SampleGenerator sg, out LightSample ls, out ShadingData s
                                                                        // rounded to triangleCount even if uLight < 1.0 when triangleCount
                                                                        // is large.
     uint triangleIndex = gScene.lightCollection.activeTriangles[idx];
-    float triangleSelectionPdf = 1.f / (float)triangleCount;
 
     // Sample the triangle uniformly.
     float2 u = sampleNext2D(sg);
     if (!sampleTriangle(triangleIndex, u, ls, sd))
         return false;
 
-    ls.Li /= triangleSelectionPdf;
+    ls.Li *= (float)triangleCount;
     return true;
 }
 
@@ -133,13 +131,13 @@ ShadingData loadShadingData(const HitInfo hit, const float3 rayOrigin, const flo
     return sd;
 }
 
-bool addVPL(in LightSample ls)
+bool addVPL(float3 posW, float3 normW, float3 Li)
 {
     uint idx = 0;
-    counter.InterlockedAdd(0, 1, idx);
+    gVPLCounter.InterlockedAdd(0, 1, idx);
     if (idx >= kMaxVPLCount)
     {
-        counter.InterlockedAdd(0, -1, idx);
+        gVPLCounter.InterlockedAdd(0, -1, idx);
         return false;
     }
 
@@ -147,9 +145,9 @@ bool addVPL(in LightSample ls)
     // Point light illumination = intensity * NdotL / (r * r)
     // Area light sampled illumination:
     // Li = Le / pdf, pdf = (r * r) / (NdotL * A)
-    vpl.intensity.rgb = ls.Li;
-    vpl.normal.xyz = ls.normW;
-    vpl.position.xyz = ls.posW;
+    vpl.intensity = float4(Li, float(kMaxPathDepth));
+    vpl.normal.xyz = normW;
+    vpl.position.xyz = posW;
 
     gVPL[idx] = vpl;
     return true;
@@ -184,26 +182,18 @@ struct ScatterRayData
     }
 };
 
-bool generateScatterRay(
-    const ShadingData sd,
-    const IMaterialInstance mi,
-    inout SampleGenerator sg,
-    inout LightSample ls,
-    out float3 bsdfVal,
-    out Ray ray
-)
+bool generateScatterRay(const ShadingData sd, const IMaterialInstance mi, inout SampleGenerator sg, out Ray ray, out float3 bsdfWeight)
 {
-    bsdfVal = float3(0.0);
     ray = {};
+    bsdfWeight = 0.0;
+
     // Sample material.
     BSDFSample bsdfSample = {};
     if (mi.sample(sd, sg, bsdfSample, true))
     {
-        ls.dir = bsdfSample.wo;
-        bsdfVal = bsdfSample.weight;
-
         // Offset ray origin to avoid self-intersection
-        ray = Ray(sd.computeRayOrigin(), ls.dir);
+        ray = Ray(sd.computeRayOrigin(), bsdfSample.wo);
+        bsdfWeight = bsdfSample.weight / abs(dot(bsdfSample.wo, sd.faceN));
 
         return true;
     }
@@ -211,19 +201,39 @@ bool generateScatterRay(
     return false;
 }
 
+// Generate light source ray by cosine weight sampling
+float generateEmissiveRay(const ShadingData sd, inout SampleGenerator sg, out Ray ray)
+{
+    float pdf;
+
+    float3 woLocal = sample_cosine_hemisphere_concentric(sampleNext2D(sg), pdf);
+    ray = Ray(sd.computeRayOrigin(), sd.frame.fromLocal(woLocal));
+
+    return pdf;
+}
+
 void handleHit(const HitInfo hit, const Ray ray, inout LightSample ls, out ShadingData sd)
 {
-    const bool isCurveHit = hit.getType() == HitType::Curve;
-    let lod = ExplicitLodTextureSampler(0.f);
-
     // Load shading data.
-    sd = loadShadingData(hit, ls.posW, ray.dir, lod);
+    sd = loadShadingData(hit, ls.posW, ray.dir, ExplicitLodTextureSampler(0.f));
+
+    ls.posW = sd.posW;
+    ls.normW = sd.getOrientedFaceNormal();
+}
+
+float3 approxSurfaceAlbedo(const ShadingData sd)
+{
+    const MaterialSystem ms = gScene.materials;
+
+    SamplerState s = ms.getTextureSampler(sd.mtl.getDefaultTextureSamplerID());
 
     // Create material instance.
-    let mi = gScene.materials.getMaterialInstance(sd, lod);
-    ls.posW = sd.posW;
-    ls.normW = sd.faceN;
-    ls.dir = float3(0.0);
+    let d = ms.getBasicMaterialData(sd.materialID);
+
+    const float3 albedo = ms.sampleTexture(d.texBaseColor, s, sd.uv, d.baseColor, ExplicitLodTextureSampler(0.f)).rgb;
+
+    // weight = albedo / PI * dot(wi, N)
+    return albedo * M_1_PI;
 }
 
 void execute(uint id)
@@ -240,20 +250,18 @@ void execute(uint id)
     if (!sampleLight(sg, ls, sd))
         return;
 
-    if (!addVPL(ls))
+    // Add luminant VPL
+    if (!addVPL(ls.posW, ls.normW, ls.Li))
         return;
 
-    Ray ray;
-    float3 weight;
+    Ray ray = {};
+
+    generateEmissiveRay(sd, sg, ray);
+
     while (depth <= kMaxPathDepth && retry > 0)
     {
-        // Generate scattering ray
-        if (!generateScatterRay(sd, gScene.materials.getMaterialInstance(sd, ExplicitLodTextureSampler(0.f)), sg, ls, weight, ray))
-        {
-            if (retry-- <= 0)
-                break;
-            continue;
-        }
+        // BSDF sample weight
+        float3 bsdfWeight = 0.0f;
 
         // Trace ray
         SceneRayQuery<kUseAlphaTest> sceneRayQuery;
@@ -267,16 +275,31 @@ void execute(uint id)
         }
 
         handleHit(hit, ray, ls, sd);
-        ls.Li *= weight;
 
-        if (all(ls.Li <= 0.0) || !addVPL(ls))
+        float cosThetaI = abs(dot(sd.faceN, ray.dir));
+        ls.Li *= cosThetaI;
+
+        // Approx surface albedo weight:
+        // albedo / PI
+        // Where pdf_L is previous light sampling pdf
+        if (all(ls.Li <= 0.0) || !addVPL(ls.posW, ls.normW, ls.Li * approxSurfaceAlbedo(sd)))
             break;
+
+        // Generate scattering ray
+        if (!generateScatterRay(sd, gScene.materials.getMaterialInstance(sd, ExplicitLodTextureSampler(0.f)), sg, ray, bsdfWeight))
+        {
+            if (retry-- <= 0)
+                break;
+            continue;
+        }
+
+        ls.Li *= bsdfWeight;
 
         depth++;
     }
 }
 
-[numthreads(16, 1, 1)]
+[numthreads(4, 1, 1)]
 void main(uint3 dispatchThreadId: SV_DispatchThreadID)
 {
     execute(dispatchThreadId.x);

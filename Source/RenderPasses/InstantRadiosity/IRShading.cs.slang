@@ -7,10 +7,12 @@ import Scene.RaytracingInline;
 import Scene.Intersection;
 import Utils.Geometry.GeometryHelpers;
 import Utils.Math.MathHelpers;
+import Utils.Sampling.SampleGenerator;
 import VPLData;
 
 // Inputs
-RWStructuredBuffer<VPLData> gVPL;
+StructuredBuffer<VPLData> gVPL;
+ByteAddressBuffer gVPLCounter;
 Texture2D<float4> gView;
 Texture2D<float4> gPosW;
 Texture2D<float4> gNormW;
@@ -24,7 +26,14 @@ RWTexture2D<float4> gColor;
 // Static configurations
 static const float kClamping = CLAMPING;
 static const bool kVisualizeVPL = VISUALIZE_VPL;
+static const uint kVPLSamples = VPL_SAMPLES;
 static const bool kUseAlphaTest = true;
+
+cbuffer CB
+{
+    uint2 frameDim = { 0, 0 };
+    uint frameCount;
+}
 
 bool traceShadowRay(float3 origin, float3 dir, float distance)
 {
@@ -32,13 +41,18 @@ bool traceShadowRay(float3 origin, float3 dir, float distance)
     HitInfo hit;
     float hitT;
 
-    Ray ray = Ray(origin, dir, 1e-4f, distance);
+    Ray ray = Ray(origin, dir, 1e-4f, distance - 1e-4f);
 
     return !sceneRayQuery.traceRay(ray, hit, hitT, RAY_FLAG_NONE, 0xff);
 }
 
 void execute(uint2 pixel)
 {
+    if (any(pixel > frameDim))
+        return;
+
+    SampleGenerator sg = SampleGenerator(pixel, frameCount);
+
     float3 color = 0.f;
     float3 emissive = gEmissive[pixel].rgb;
 
@@ -51,12 +65,14 @@ void execute(uint2 pixel)
     float3 F0 = lerp(float3(0.04f, 0.04f, 0.04f), specRough.rgb, specRough.a);
     float roughness = specRough.w;
 
-    const uint VPLCount = 200;
+    const uint VPLCount = gVPLCounter.Load(0);
+    const bool sampleAll = kVPLSamples == 0 || kVisualizeVPL;
+    const uint sampleCount = sampleAll ? VPLCount : kVPLSamples;
 
-    [[unroll]]
-    for (int i = 0; i < VPLCount; i++)
+    for (int i = 0; i < sampleCount; i++)
     {
-        VPLData vpl = gVPL[i];
+        int idx = sampleAll ? i : min(uint(sampleNext1D(sg) * float(VPLCount)), VPLCount);
+        VPLData vpl = gVPL[idx];
 
         float3 toLight = vpl.position.xyz - posW;
         float dist2 = dot(toLight, toLight);
@@ -76,10 +92,10 @@ void execute(uint2 pixel)
                 // VPL factor
                 float vplFac = max(0.0f, dot(vpl.normal.xyz, -L));
 
-                float vis = traceShadowRay(computeRayOrigin(posW, normW), L, dist - 1e-4) ? 1.0 : 0.0;
+                float vis = traceShadowRay(posW, L, dist) ? 1.0 : 0.0;
 
                 // Lambertian BRDF
-                float3 diffuseContrib = diffuse * cosThetaI * vplFac * vpl.intensity.rgb / dist2;
+                float3 diffuseContrib = diffuse * M_1_PI;
 
                 float3 H = normalize(view + L);
                 float cosThetaH = max(0.0f, dot(normW, H));
@@ -97,7 +113,9 @@ void execute(uint2 pixel)
 
                 float3 specularContrib = (F * NDF * G) / (4.0f * max(dot(view, normW), 0.0f) * cosThetaI + 0.001f);
 
-                color += (diffuseContrib + specularContrib) * vis;
+                float3 f = diffuseContrib + specularContrib;
+                float3 Li = vplFac * vpl.intensity.rgb / max(dist2, kClamping);
+                color += f * vis * Li * cosThetaI * vpl.intensity.a;
             }
         }
     }
@@ -108,7 +126,7 @@ void execute(uint2 pixel)
     }
     else
     {
-        color /= float(VPLCount);
+        color /= float(sampleCount);
         gColor[pixel] = float4(color + emissive, 1.0f);
     }
 }
