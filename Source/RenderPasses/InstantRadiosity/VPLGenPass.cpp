@@ -60,7 +60,9 @@ RenderPassReflection VPLGenPass::reflect(const CompileData& compileData)
     RenderPassReflection reflector;
 
     // Max sample per path = max path bounces + 2(starting point and ending point (if exists))
-    reflector.addOutput("vpl", "Virtual point light(VPL) data").rawBuffer(kMaxVPLCountLimit * sizeof(VPLData));
+    reflector.addOutput("vpl", "Virtual point light(VPL) data")
+        .rawBuffer(kMaxVPLCountLimit * sizeof(VPLData))
+        .flags(RenderPassReflection::Field::Flags::Persistent);
     reflector.addOutput("vplCounter", "VPL counter buffer").rawBuffer(sizeof(uint32_t));
 
     addRenderPassOutputs(reflector, {kOutputChannel});
@@ -84,10 +86,14 @@ void VPLGenPass::execute(RenderContext* pRenderContext, const RenderData& render
     bool envmapChanged = is_set(mpScene->getUpdates(), Scene::UpdateFlags::EnvMapChanged) ||
                          is_set(mpScene->getUpdates(), Scene::UpdateFlags::EnvMapPropertiesChanged);
     bool meshLightChanged = is_set(mpScene->getUpdates(), Scene::UpdateFlags::LightCollectionChanged);
+
+    bool sceneChanged = is_set(mpScene->getUpdates(), Scene::UpdateFlags::GeometryChanged);
     // Check for scene changes that require shader recompilation.
-    if (is_set(mpScene->getUpdates(), Scene::UpdateFlags::RecompileNeeded) || lightChanged || envmapChanged || meshLightChanged)
+    if (is_set(mpScene->getUpdates(), Scene::UpdateFlags::RecompileNeeded) || lightChanged || envmapChanged || meshLightChanged ||
+        sceneChanged)
     {
         recreatePrograms();
+        mRegenerate = true;
     }
 
     if (mpScene->getRenderSettings().useEmissiveLights)
@@ -105,6 +111,7 @@ void VPLGenPass::execute(RenderContext* pRenderContext, const RenderData& render
         dict[Falcor::kRenderPassRefreshFlags] = flags;
         recreatePrograms();
         mOptionsChanged = false;
+        mRegenerate = true;
     }
 
     executeCreatePass(pRenderContext, renderData);
@@ -129,7 +136,7 @@ void VPLGenPass::renderUI(Gui::Widgets& widget)
 {
     bool dirty = false;
 
-    dirty |= widget.var("Max VPL count", mParams.maxVPLCount, 1u, 1024u);
+    dirty |= widget.var("Max VPL count", mParams.maxVPLCount, 1u, kMaxVPLCountLimit);
 
     dirty |= widget.var("Max path depth", mParams.maxPathDepth, 1u, 8u);
 
@@ -144,6 +151,7 @@ void VPLGenPass::renderUI(Gui::Widgets& widget)
 void VPLGenPass::recreatePrograms()
 {
     mpCreateVPLPass = nullptr;
+    mRegenerate = true;
 }
 
 void VPLGenPass::executeCreatePass(RenderContext* pRenderContext, const RenderData& renderData)
@@ -151,6 +159,9 @@ void VPLGenPass::executeCreatePass(RenderContext* pRenderContext, const RenderDa
     FALCOR_ASSERT(mpScene);
 
     FALCOR_PROFILE(pRenderContext, "VPL Create Pass");
+
+    if (!mRegenerate)
+        return;
 
     if (!mpCreateVPLPass)
     {
@@ -198,4 +209,6 @@ void VPLGenPass::executeCreatePass(RenderContext* pRenderContext, const RenderDa
 
         pRenderContext->copyResource(mpCounterStagingBuffer.get(), counterBuffer.get());
     } while (mVPLCount < mParams.maxVPLCount);
+
+    mRegenerate = false;
 }

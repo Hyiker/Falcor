@@ -13,12 +13,8 @@ import VPLData;
 // Inputs
 StructuredBuffer<VPLData> gVPL;
 ByteAddressBuffer gVPLCounter;
-Texture2D<float4> gView;
-Texture2D<float4> gPosW;
-Texture2D<float4> gNormW;
-Texture2D<float4> gEmissive;
-Texture2D<float4> gDiffOpacity;
-Texture2D<float4> gSpecRough;
+Texture2D<PackedHitInfo> gVBuffer;
+Texture2D<float4> gViewW;
 
 // Outputs
 RWTexture2D<float4> gColor;
@@ -45,6 +41,56 @@ bool traceShadowRay(float3 origin, float3 dir, float distance)
 
     return !sceneRayQuery.traceRay(ray, hit, hitT, RAY_FLAG_NONE, 0xff);
 }
+/**
+ * Setup ShadingData based on loaded vertex/material attributes for a hit point.
+ * @param[in] hit Hit information.
+ * @param[in] rayOrigin Ray origin.
+ * @param[in] rayDir Normalized ray direction.
+ * @param[in] lod Method for computing texture level-of-detail.
+ * @return ShadingData struct.
+ */
+ShadingData loadShadingData(const HitInfo hit, const float3 rayOrigin, const float3 rayDir, const ITextureSampler lod)
+{
+    VertexData v = {};
+    uint materialID = {};
+
+#if SCENE_HAS_GEOMETRY_TYPE(GEOMETRY_TYPE_TRIANGLE_MESH)
+    if (hit.getType() == HitType::Triangle)
+    {
+        const TriangleHit triangleHit = hit.getTriangleHit();
+        v = gScene.getVertexData(triangleHit);
+        materialID = gScene.getMaterialID(triangleHit.instanceID);
+    }
+#endif
+#if SCENE_HAS_GEOMETRY_TYPE(GEOMETRY_TYPE_DISPLACED_TRIANGLE_MESH)
+    if (hit.getType() == HitType::DisplacedTriangle)
+    {
+        const DisplacedTriangleHit displacedTriangleHit = hit.getDisplacedTriangleHit();
+        v = gScene.getVertexData(displacedTriangleHit, -rayDir);
+        materialID = gScene.getMaterialID(displacedTriangleHit.instanceID);
+    }
+#endif
+#if SCENE_HAS_GEOMETRY_TYPE(GEOMETRY_TYPE_CURVE)
+    if (hit.getType() == HitType::Curve)
+    {
+        const CurveHit curveHit = hit.getCurveHit();
+        v = gScene.getVertexDataFromCurve(curveHit);
+        materialID = gScene.getMaterialID(curveHit.instanceID);
+    }
+#endif
+#if SCENE_HAS_GEOMETRY_TYPE(GEOMETRY_TYPE_SDF_GRID)
+    if (hit.getType() == HitType::SDFGrid)
+    {
+        const SDFGridHit sdfGridHit = hit.getSDFGridHit();
+        v = gScene.getVertexDataFromSDFGrid(sdfGridHit, rayOrigin, rayDir);
+        materialID = gScene.getMaterialID(sdfGridHit.instanceID);
+    }
+#endif
+
+    ShadingData sd = gScene.materials.prepareShadingData(v, materialID, -rayDir, lod);
+
+    return sd;
+}
 
 void execute(uint2 pixel)
 {
@@ -53,33 +99,47 @@ void execute(uint2 pixel)
 
     SampleGenerator sg = SampleGenerator(pixel, frameCount);
 
+    float3 viewW = -gViewW[pixel].xyz;
+    const HitInfo hit = HitInfo(gVBuffer[pixel]);
+
+    if (!hit.isValid())
+    {
+        gColor[pixel] = float4(gScene.envMap.eval(viewW), 1.0f);
+        return;
+    }
+
     float3 color = 0.f;
-    float3 emissive = gEmissive[pixel].rgb;
-
-    float3 view = gView[pixel].xyz;
-    float3 posW = gPosW[pixel].xyz;
-    float3 normW = gNormW[pixel].xyz;
-    float3 diffuse = gDiffOpacity[pixel].rgb;
-    float4 specRough = gSpecRough[pixel];
-
-    float3 F0 = lerp(float3(0.04f, 0.04f, 0.04f), specRough.rgb, specRough.a);
-    float roughness = specRough.w;
 
     const uint VPLCount = gVPLCounter.Load(0);
     const bool sampleAll = kVPLSamples == 0 || kVisualizeVPL;
     const uint sampleCount = sampleAll ? VPLCount : kVPLSamples;
 
+    // Shading data
+    const float3 primaryRayOrigin = gScene.camera.getPosition();
+    const float3 primaryRayDir = viewW;
+
+    let lod = ExplicitLodTextureSampler(0.f);
+
+    // Load shading data.
+    ShadingData sd = loadShadingData(hit, primaryRayOrigin, primaryRayDir, lod);
+
+    // Create BSDF instance and query its properties.
+    const IMaterialInstance mi = gScene.materials.getMaterialInstance(sd, lod);
+
+    BSDFProperties bsdfProperties = mi.getProperties(sd);
+
     for (int i = 0; i < sampleCount; i++)
     {
         int idx = sampleAll ? i : min(uint(sampleNext1D(sg) * float(VPLCount)), VPLCount);
-        VPLData vpl = gVPL[idx];
 
-        float3 toLight = vpl.position.xyz - posW;
+        // VPL illumination configs
+        VPLData vpl = gVPL[idx];
+        float3 toLight = vpl.position.xyz - sd.posW;
         float dist2 = dot(toLight, toLight);
         float dist = sqrt(dist2);
 
         float3 L = toLight / dist;
-        float cosThetaI = dot(L, normW);
+        float cosThetaI = dot(L, sd.getOrientedFaceNormal());
 
         if (kVisualizeVPL)
         {
@@ -92,42 +152,25 @@ void execute(uint2 pixel)
                 // VPL factor
                 float vplFac = max(0.0f, dot(vpl.normal.xyz, -L));
 
-                float vis = traceShadowRay(posW, L, dist) ? 1.0 : 0.0;
+                float vis = traceShadowRay(sd.posW, L, dist) ? 1.0 : 0.0;
 
-                // Lambertian BRDF
-                float3 diffuseContrib = diffuse * M_1_PI;
-
-                float3 H = normalize(view + L);
-                float cosThetaH = max(0.0f, dot(normW, H));
-
-                float3 F = F0 + (1.0f - F0) * pow(1.0f - max(dot(H, view), 0.0f), 5.0f);
-
-                float alpha = roughness * roughness;
-                float alpha2 = alpha * alpha;
-                float NDF = alpha2 / (M_PI * pow((cosThetaH * cosThetaH * (alpha2 - 1.0) + 1.0), 2.0));
-
-                float k = (alpha + 1.0f) * (alpha + 1.0f) / 8.0f;
-                float G_V = cosThetaI / (cosThetaI * (1.0f - k) + k);
-                float G_L = dot(normW, view) / (dot(normW, view) * (1.0f - k) + k);
-                float G = G_V * G_L;
-
-                float3 specularContrib = (F * NDF * G) / (4.0f * max(dot(view, normW), 0.0f) * cosThetaI + 0.001f);
-
-                float3 f = diffuseContrib + specularContrib;
                 float3 Li = vplFac * vpl.intensity.rgb / max(dist2, kClamping);
-                color += f * vis * Li * cosThetaI * vpl.intensity.a;
+
+                float3 f = mi.eval(sd, L, sg);
+
+                color += f * vis * Li * vpl.intensity.a;
             }
         }
     }
 
     if (kVisualizeVPL)
     {
-        gColor[pixel] = float4(color + diffuse * 0.03f, 1.0f);
+        gColor[pixel] = float4(color + bsdfProperties.diffuseReflectionAlbedo * 0.03f, 1.0f);
     }
     else
     {
         color /= float(sampleCount);
-        gColor[pixel] = float4(color + emissive, 1.0f);
+        gColor[pixel] = float4(color + bsdfProperties.emission, 1.0f);
     }
 }
 
