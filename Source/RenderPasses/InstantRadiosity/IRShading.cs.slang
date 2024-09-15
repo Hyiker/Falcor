@@ -8,6 +8,7 @@ import Scene.Intersection;
 import Utils.Geometry.GeometryHelpers;
 import Utils.Math.MathHelpers;
 import Utils.Sampling.SampleGenerator;
+import Rendering.Lights.LightHelpers;
 import VPLData;
 
 // Inputs
@@ -92,6 +93,41 @@ ShadingData loadShadingData(const HitInfo hit, const float3 rayOrigin, const flo
     return sd;
 }
 
+float3 evalDirectAnalytic(const ShadingData sd, const IMaterialInstance mi, inout SampleGenerator sg)
+{
+    const uint lightCount = gScene.getLightCount();
+    if (lightCount == 0)
+        return float3(0.f);
+
+    // Pick one of the analytic light sources randomly with equal probability.
+    const uint lightIndex = min(uint(sampleNext1D(sg) * lightCount), lightCount - 1);
+    float invPdf = lightCount; // Light selection pdf = 1.0 / lightCount.
+
+    // Sample local light source.
+    AnalyticLightSample ls;
+    if (!sampleLight(sd.posW, gScene.getLight(lightIndex), sg, ls))
+        return float3(0.f);
+
+    // Reject sample if not in the hemisphere of a BSDF lobe.
+    const uint lobeTypes = mi.getLobeTypes(sd);
+    const bool hasReflection = lobeTypes & uint(LobeType::Reflection);
+    const bool hasTransmission = lobeTypes & uint(LobeType::Transmission);
+    float NdotL = dot(sd.getOrientedFaceNormal(), ls.dir);
+    if ((NdotL <= kMinCosTheta && !hasTransmission) || (NdotL >= -kMinCosTheta && !hasReflection))
+        return float3(0.f);
+
+    // Get origin with offset applied in direction of the geometry normal to avoid self-intersection.
+    const float3 origin = computeRayOrigin(sd.posW, dot(sd.faceN, ls.dir) >= 0.f ? sd.faceN : -sd.faceN);
+
+    // Test visibility by tracing a shadow ray.
+    bool V = traceShadowRay(origin, ls.dir, ls.distance);
+    if (!V)
+        return float3(0.f);
+
+    // Evaluate contribution.
+    return mi.eval(sd, ls.dir, sg) * ls.Li * invPdf;
+}
+
 void execute(uint2 pixel)
 {
     if (any(pixel > frameDim))
@@ -169,8 +205,10 @@ void execute(uint2 pixel)
     }
     else
     {
+        float3 Lr = evalDirectAnalytic(sd, mi, sg);
+
         color /= float(sampleCount);
-        gColor[pixel] = float4(color + bsdfProperties.emission, 1.0f);
+        gColor[pixel] = float4(color + bsdfProperties.emission + Lr, 1.0f);
     }
 }
 
