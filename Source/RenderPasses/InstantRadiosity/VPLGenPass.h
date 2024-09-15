@@ -2,11 +2,8 @@
 
 #include "Falcor.h"
 #include "RenderGraph/RenderPass.h"
-#include "VPLData.slang"
 
 using namespace Falcor;
-
-static_assert(sizeof(VPLData) % 16 == 0, "VPLData struct should be 16-byte aligned.");
 
 /**
  * Virtual Point Light(VPL) source generate pass.
@@ -29,8 +26,8 @@ public:
 private:
     struct Params
     {
-        uint32_t maxVPLCount = 200u; ///< Maximum VPL count in total.
-        uint32_t maxPathDepth = 8u;  ///< Maximum path depth for each path(Some may be early-terminated).
+        uint32_t maxVPLCount = 100u; ///< Maximum VPL count in total.
+        uint32_t maxPathDepth = 5u;  ///< Maximum path depth for each path(Some may be early-terminated).
     };
 
     void parseProperties(const Properties& props);
@@ -46,7 +43,6 @@ private:
     ref<SampleGenerator> mpSampleGenerator; ///< GPU pseudo-random sample generator.
 
     // GPU buffer
-    ref<Buffer> mpCounterBuffer;
     ref<Buffer> mpCounterStagingBuffer;
 
     ref<ComputePass> mpCreateVPLPass;

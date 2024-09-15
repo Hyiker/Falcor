@@ -4,6 +4,7 @@
 
 BEGIN_NAMESPACE_FALCOR
 
+// VPL Buffer storage data
 struct VPLData
 {
     float4 position;  ///< World space position.

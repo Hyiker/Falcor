@@ -2,6 +2,7 @@ add_plugin(InstantRadiosity)
 
 target_sources(InstantRadiosity PRIVATE
     InstantRadiosity.cpp
+    InstantRadiosity.h
 
     CreateVPL.cs.slang
     VPLData.slang

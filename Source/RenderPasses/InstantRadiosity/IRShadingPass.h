@@ -23,7 +23,8 @@ private:
     struct Params
     {
         float clamping = 0.1f;     ///< VPL shading clamping factor to avoid artifact.
-        bool visualizeVPL = true; ///< Enable VPL position and intensity visualization.
+        bool visualizeVPL = false; ///< Enable VPL position and intensity visualization.
+        uint32_t vplSamples = 4;   ///< VPL samples per frame, if 0, sample all VPLs at once.
     };
 
     void parseProperties(const Properties& props);
@@ -34,9 +35,11 @@ private:
     Params mParams;
 
     // Internal state
-    ref<Scene> mpScene; ///< Current scene
+    ref<Scene> mpScene;                     ///< Current scene
+    ref<SampleGenerator> mpSampleGenerator; ///< GPU pseudo-random sample generator.
 
     ref<ComputePass> mpShadingPass;
+    uint32_t mFrameCount = 0;
 
     bool mOptionsChanged = false;
 };
