@@ -28,3 +28,5 @@ def render_graph_VPLGen():
 vplGen = render_graph_VPLGen()
 try: m.addGraph(vplGen)
 except NameError: None
+
+m.clock.pause()
