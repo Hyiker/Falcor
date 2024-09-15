@@ -138,7 +138,7 @@ void VPLGenPass::renderUI(Gui::Widgets& widget)
 
     dirty |= widget.var("Max VPL count", mParams.maxVPLCount, 1u, kMaxVPLCountLimit);
 
-    dirty |= widget.var("Max path depth", mParams.maxPathDepth, 1u, 8u);
+    dirty |= widget.var("Max path depth", mParams.maxPathDepth, 1u, 16u);
 
     widget.text(fmt::format("VPL Count = {}", mVPLCount));
 
