@@ -26,8 +26,8 @@ public:
 private:
     struct Params
     {
-        uint32_t maxVPLCount = 100u; ///< Maximum VPL count in total.
-        uint32_t maxPathDepth = 5u;  ///< Maximum path depth for each path(Some may be early-terminated).
+        uint32_t maxVPLCount = 1000u; ///< Maximum VPL count in total.
+        uint32_t maxPathDepth = 8u;  ///< Maximum path depth for each path(Some may be early-terminated).
     };
 
     void parseProperties(const Properties& props);
@@ -49,6 +49,8 @@ private:
 
     // CPU statistics
     uint32_t mVPLCount;
+
+    bool mRegenerate = true;
 
     bool mOptionsChanged = false;
 };

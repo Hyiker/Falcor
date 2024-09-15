@@ -18,12 +18,8 @@ const std::string kVPLSamples = "vplSamples";
 const std::string kVPLBuffer = "gVPL";
 const std::string kVPLCounterBuffer = "gVPLCounter";
 const Falcor::ChannelList kInputChannels = {
-    {"viewW", "gView", "World-space view direction (xyz float format)", false, ResourceFormat::RGBA32Float},
-    {"posW", "gPosW", "World-space position (xyz float format)", false, ResourceFormat::RGBA32Float},
-    {"normW", "gNormW", "Shading normal in world space", false, ResourceFormat::RGBA32Float},
-    {"emissive", "gEmissive", "Emissive color", false, ResourceFormat::RGBA32Float},
-    {"diffuseOpacity", "gDiffOpacity", "Diffuse reflection albedo and opacity", false, ResourceFormat::RGBA32Float},
-    {"specRough", "gSpecRough", "Specular reflectance and roughness", false, ResourceFormat::RGBA32Float},
+    {"vbuffer", "gVBuffer", "Visibility buffer in packed format", false},
+    {"viewW", "gViewW", "World-space view direction (xyz float format)", false, ResourceFormat::RGBA32Float},
 };
 
 // Outputs
