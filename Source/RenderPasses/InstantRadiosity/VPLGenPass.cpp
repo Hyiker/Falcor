@@ -22,6 +22,20 @@ const std::string kVPLCounterBuffer = "gVPLCounter";
 const ChannelDesc kOutputChannel{"output", "gOutput", "An output to ensure VPLGenPass being executed", false, ResourceFormat::RGBA32Float};
 } // namespace
 
+void VPLGenPass::registerBindings(pybind11::module& m)
+{
+    // VPL data
+    pybind11::class_<VPLData> vplData(m, "VPLData");
+    vplData.def_readwrite("position", &VPLData::position);
+    vplData.def_readwrite("normal", &VPLData::normal);
+    vplData.def_readwrite("intensity", &VPLData::intensity);
+
+    // VPL generate pass
+    pybind11::class_<VPLGenPass, RenderPass, ref<VPLGenPass>> pass(m, "VPLGenPass");
+    pass.def_property_readonly("vpls", &VPLGenPass::getVPLData);
+    pass.def_property("maxVplCount", &VPLGenPass::getMaxVPLCount, &VPLGenPass::setMaxVPLCount);
+}
+
 VPLGenPass::VPLGenPass(ref<Device> pDevice, const Properties& props) : RenderPass(pDevice)
 {
     parseProperties(props);
@@ -30,6 +44,9 @@ VPLGenPass::VPLGenPass(ref<Device> pDevice, const Properties& props) : RenderPas
     mpSampleGenerator = SampleGenerator::create(mpDevice, SAMPLE_GENERATOR_DEFAULT);
 
     mpCounterStagingBuffer = mpDevice->createBuffer(sizeof(uint32_t), ResourceBindFlags::None, MemoryType::ReadBack, nullptr);
+    mpVPLStagingBuffer =
+        mpDevice->createBuffer(sizeof(VPLData) * kMaxVPLCountLimit, ResourceBindFlags::None, MemoryType::ReadBack, nullptr);
+    mpFence = mpDevice->createFence();
 }
 
 void VPLGenPass::parseProperties(const Properties& props)
@@ -132,6 +149,22 @@ void VPLGenPass::setScene(RenderContext* pRenderContext, const ref<Scene>& pScen
     }
 }
 
+const std::vector<VPLData>& VPLGenPass::getVPLData() const
+{
+    return mVPLs;
+}
+
+void VPLGenPass::setMaxVPLCount(uint32_t value)
+{
+    mParams.maxVPLCount = value;
+    mOptionsChanged = true;
+}
+
+uint32_t VPLGenPass::getMaxVPLCount() const
+{
+    return mParams.maxVPLCount;
+}
+
 void VPLGenPass::renderUI(Gui::Widgets& widget)
 {
     bool dirty = false;
@@ -186,14 +219,15 @@ void VPLGenPass::executeCreatePass(RenderContext* pRenderContext, const RenderDa
             mpScene->bindShaderDataForRaytracing(pRenderContext, var["gScene"]);
         mpSampleGenerator->bindShaderData(var);
     }
-    ref<Buffer> counterBuffer = static_ref_cast<Buffer>(renderData.getResource("vplCounter"));
+    auto counterBuffer = static_ref_cast<Buffer>(renderData.getResource("vplCounter"));
+    auto vplBuffer = static_ref_cast<Buffer>(renderData.getResource("vpl"));
 
     pRenderContext->clearUAV(counterBuffer->getUAV().get(), uint4(0));
 
     ShaderVar var = mpCreateVPLPass->getRootVar();
 
     var[kOutputChannel.texname] = renderData.getTexture(kOutputChannel.name);
-    var[kVPLBuffer] = static_ref_cast<Buffer>(renderData.getResource("vpl"));
+    var[kVPLBuffer] = vplBuffer;
     var[kVPLCounterBuffer] = counterBuffer;
 
     // Compute dispatch
@@ -202,14 +236,23 @@ void VPLGenPass::executeCreatePass(RenderContext* pRenderContext, const RenderDa
     {
         mpCreateVPLPass->execute(pRenderContext, uint3(dispatchDim, 1, 1));
 
+        pRenderContext->copyResource(mpCounterStagingBuffer.get(), counterBuffer.get());
         pRenderContext->submit(true);
 
         mVPLCount = *reinterpret_cast<const uint32_t*>(mpCounterStagingBuffer->map());
         mpCounterStagingBuffer->unmap();
         FALCOR_ASSERT(mVPLCount <= mParams.maxVPLCount);
-
-        pRenderContext->copyResource(mpCounterStagingBuffer.get(), counterBuffer.get());
     } while (mVPLCount < mParams.maxVPLCount);
 
+    // VPL read back
+    {
+        pRenderContext->copyResource(mpVPLStagingBuffer.get(), vplBuffer.get());
+        mVPLs.resize(mVPLCount);
+        pRenderContext->submit(true);
+
+        const auto* data = reinterpret_cast<const VPLData*>(mpVPLStagingBuffer->map());
+        std::memcpy(mVPLs.data(), data, sizeof(VPLData) * mVPLCount);
+        mpVPLStagingBuffer->unmap();
+    }
     mRegenerate = false;
 }

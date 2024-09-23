@@ -12,6 +12,10 @@ target_sources(InstantRadiosity PRIVATE
     IRShading.cs.slang
     IRShadingPass.h
     IRShadingPass.cpp
+
+    VPLVisibility.cs.slang
+    VPLVisibilityPass.cpp
+    VPLVisibilityPass.h
 )
 
 target_copy_shaders(InstantRadiosity RenderPasses/InstantRadiosity)

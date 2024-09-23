@@ -2,6 +2,7 @@
 
 #include "Falcor.h"
 #include "RenderGraph/RenderPass.h"
+#include "VPLData.slang"
 
 using namespace Falcor;
 
@@ -23,11 +24,18 @@ public:
     virtual void renderUI(Gui::Widgets& widget) override;
     virtual void setScene(RenderContext* pRenderContext, const ref<Scene>& pScene) override;
 
+    // Setter and getter
+    const std::vector<VPLData>& getVPLData() const;
+    void setMaxVPLCount(uint32_t value);
+    uint32_t getMaxVPLCount() const;
+
+    static void registerBindings(pybind11::module& m);
+
 private:
     struct Params
     {
         uint32_t maxVPLCount = 1000u; ///< Maximum VPL count in total.
-        uint32_t maxPathDepth = 8u;  ///< Maximum path depth for each path(Some may be early-terminated).
+        uint32_t maxPathDepth = 8u;   ///< Maximum path depth for each path(Some may be early-terminated).
     };
 
     void parseProperties(const Properties& props);
@@ -42,11 +50,16 @@ private:
     ref<Scene> mpScene;                     ///< Current scene
     ref<SampleGenerator> mpSampleGenerator; ///< GPU pseudo-random sample generator.
 
-    // GPU buffer
+    // GPU fence for synchronizing
+    ref<Fence> mpFence;
+    // GPU staging buffer
     ref<Buffer> mpCounterStagingBuffer;
+    ref<Buffer> mpVPLStagingBuffer;
 
     ref<ComputePass> mpCreateVPLPass;
 
+    // CPU data
+    std::vector<VPLData> mVPLs;
     // CPU statistics
     uint32_t mVPLCount;
 
