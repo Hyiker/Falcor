@@ -68,6 +68,8 @@ public:
 
     void reset();
 
+    ref<LightCluster> getLightCluster() { return mpLightCluster; }
+
     static void registerBindings(pybind11::module& m);
 
 private:
@@ -174,7 +176,7 @@ private:
     ref<SampleGenerator>            mpSampleGenerator;          ///< GPU pseudo-random sample generator.
     std::unique_ptr<EnvMapSampler>  mpEnvMapSampler;            ///< Environment map sampler or nullptr if not used.
     std::unique_ptr<EmissiveLightSampler> mpEmissiveSampler;    ///< Emissive light sampler or nullptr if not used.
-    std::unique_ptr<LightCluster>   mpLightCluster;             ///< Light cluster or nullptr if not used.
+    ref<LightCluster>               mpLightCluster;             ///< Light cluster or nullptr if not used.
     std::unique_ptr<RTXDI>          mpRTXDI;                    ///< RTXDI sampler for direct illumination or nullptr if not used.
     std::unique_ptr<PixelStats>     mpPixelStats;               ///< Utility class for collecting pixel stats.
     std::unique_ptr<PixelDebug>     mpPixelDebug;               ///< Utility class for pixel debugging (print in shaders).

@@ -1,4 +1,5 @@
 #pragma once
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <vector>
@@ -9,8 +10,9 @@
 namespace Falcor
 {
 
-class FALCOR_API LightCluster
+class FALCOR_API LightCluster : public Object
 {
+    FALCOR_OBJECT(LightCluster)
 public:
     /** Creates a LightBVHSampler for a given scene.
         \param[in] pRenderContext The render context.
@@ -48,7 +50,12 @@ public:
 
     bool update(RenderContext* pRenderContext);
 
+    const auto& getNodes() const { return mNodes; }
+
+    const auto& getLightIndices() const { return mLightIndices; }
+
 protected:
+
     void rebuildClusters(RenderContext* pRenderContext);
 
     using IndexedLight = std::pair<ref<Light>, uint32_t>;
@@ -78,6 +85,7 @@ protected:
 
     // CPU resources
     mutable std::vector<ClusterNode> mNodes; ///< CPU-side copy of cluster nodes.
+    std::vector<uint32_t> mLightIndices;     ///< CPU-side copy of light indices.
     ClusterStats mClusterStats;
     bool mIsValid = false; ///< True when the cluster has been built.
     bool mNeedsRebuild = true;

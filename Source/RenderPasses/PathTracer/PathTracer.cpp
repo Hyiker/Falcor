@@ -204,6 +204,7 @@ void PathTracer::registerBindings(pybind11::module& m)
     pybind11::class_<PathTracer, RenderPass, ref<PathTracer>> pass(m, "PathTracer");
     pass.def("reset", &PathTracer::reset);
     pass.def_property_readonly("pixelStats", &PathTracer::getPixelStats);
+    pass.def_property_readonly("lightCluster", &PathTracer::getLightCluster);
 
     pass.def_property(
         "useFixedSeed",
@@ -1144,6 +1145,7 @@ void PathTracer::resetLighting()
         mLightBVHOptions = lightBVHSampler->getOptions();
     }
 
+    mpLightCluster = nullptr;
     mpEmissiveSampler = nullptr;
     mpEnvMapSampler = nullptr;
     mpLightCluster = nullptr;
@@ -1259,7 +1261,7 @@ bool PathTracer::prepareLighting(RenderContext* pRenderContext)
             FALCOR_ASSERT(mpScene && mpScene->getLightCount() > 0);
             FALCOR_ASSERT(!mpLightCluster);
 
-            mpLightCluster = std::make_unique<LightCluster>(pRenderContext, mpScene);
+            mpLightCluster = make_ref<LightCluster>(pRenderContext, mpScene);
             lightingChanged = true;
             mRecompile = true;
         }

@@ -1,5 +1,6 @@
 #include "LightCluster.h"
 #include <limits>
+#include <random>
 
 #include "Core/API/Buffer.h"
 #include "Core/API/Formats.h"
@@ -12,6 +13,7 @@
 #include "Scene/Lights/LightData.slang"
 #include "Utils/Math/VectorMath.h"
 #include "Utils/Timing/Profiler.h"
+#include "Utils/Scripting/ScriptBindings.h"
 
 namespace Falcor
 {
@@ -47,7 +49,7 @@ bool LightCluster::update(RenderContext* pRenderContext)
     bool clusterChanged = false;
 
     // Check if light collection has changed.
-    if (is_set(mpScene->getUpdates(), Scene::UpdateFlags::LightCollectionChanged))
+    if (is_set(mpScene->getUpdates(), Scene::UpdateFlags::LightsMoved))
     {
         mNeedsRebuild = true;
     }
@@ -113,6 +115,7 @@ void LightCluster::rebuildClusters(RenderContext* pRenderContext)
 
     uploadCPUBuffers(lightIndices, clusterIndices);
 
+    mLightIndices = std::move(lightIndices);
     mIsValid = true;
 }
 
@@ -167,6 +170,7 @@ void LightCluster::minimalDistanceCluster(fstd::span<IndexedLight> lights, uint3
         std::iter_swap(clusterEnd, maxIt);
     }
 
+    FALCOR_ASSERT(lightCount != 0);
     // Create new light cluster
     ClusterNode node;
     node.origin = bounds.center();
@@ -174,10 +178,11 @@ void LightCluster::minimalDistanceCluster(fstd::span<IndexedLight> lights, uint3
     node.power = power;
     node.lightCount = lightCount;
     node.lightOffset = lightOffset;
-
     mNodes.push_back(node);
-    if (maxDist >= 0)
+
+    if (hasNewCluster)
     {
+        // New cluster partition.
         minimalDistanceCluster(lights.subspan(lightCount, lights.size() - lightCount), lightOffset + lightCount, distanceTolerance);
     }
 }
@@ -291,6 +296,25 @@ void LightCluster::bindShaderData(const ShaderVar& var) const
         var["lightIndices"] = mpLightIndicesBuffer;
         var["clusterIndices"] = mpClusterIndicesBuffer;
     }
+}
+
+FALCOR_SCRIPT_BINDING(LightCluster)
+{
+    using namespace pybind11::literals;
+
+    // ClusterNode
+    pybind11::class_<ClusterNode> clusterNode(m, "ClusterNode");
+    clusterNode.def_readwrite("origin", &ClusterNode::origin);
+    clusterNode.def_readwrite("extent", &ClusterNode::extent);
+    clusterNode.def_readwrite("power", &ClusterNode::power);
+    clusterNode.def_readwrite("lightCount", &ClusterNode::lightCount);
+    clusterNode.def_readwrite("lightOffset", &ClusterNode::lightOffset);
+
+    // Light cluster
+    pybind11::class_<LightCluster, ref<LightCluster>> lightCluster(m, "LightCluster");
+
+    lightCluster.def_property_readonly("nodes", &LightCluster::getNodes);
+    lightCluster.def_property_readonly("lightIndices", &LightCluster::getLightIndices);
 }
 
 } // namespace Falcor

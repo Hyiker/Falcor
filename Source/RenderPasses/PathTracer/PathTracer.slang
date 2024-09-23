@@ -368,10 +368,7 @@ struct PathTracer
         \param[in,out] path Path state.
         \param[in] weight Vertex throughput.
     */
-    void updatePathVisibilityThroughput(inout PathState path, float visibility)
-    {
-        path.vis += visibility;
-    }
+    void updatePathVisibilityThroughput(inout PathState path, float visibility) { path.vis += visibility; }
 
     /** Generates a new scatter ray using BSDF importance sampling.
         \param[in] sd Shading data.
@@ -640,10 +637,13 @@ struct PathTracer
         {
             ClusterNode node = lightCluster.getNodeByLightIndex(lightIndex);
 
-            float3 toLight = node.origin - vertex.pos;
+
+            float3 visPos = node.useReprVis() ? lightCluster.lightIndices[node.lightOffset] : node.origin;
+
+            float3 toLight = visPos - vertex.pos;
             float distSqr = max(dot(toLight, toLight), kMinLightDistSqr);
             ls.distance = sqrt(distSqr);
-            ls.dir = toLight / ls.distance;
+            ls.dir = node.isEnabled() ? (toLight / ls.distance) : float3(0);
         }
         else
         {
@@ -1061,7 +1061,14 @@ struct PathTracer
                         }
 
                         logTraceRay(PixelStatsRayType::Visibility);
-                        bool visible = vq.traceVisibilityRay(ray);
+
+                        bool visible;
+                        if (kUseLightCluster && length(ray.dir) == 0.0) {
+                            // ray.dir.length == 0.0 means cluster disabled
+                            visible = false;
+                        } else {
+                            visible = vq.traceVisibilityRay(ray);
+                        }
                         if (visible)
                             addToPathContribution(path, Lr);
                         updatePathVisibilityThroughput(path, visible ? 1.0 : 0.0);
