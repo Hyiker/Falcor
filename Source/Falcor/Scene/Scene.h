@@ -861,9 +861,17 @@ namespace Falcor
         */
         ref<Light> getLightByName(const std::string& name) const;
 
+        /** Get the number of active lights in the scene.
+        */
+        uint32_t getActiveLightCount() const { return (uint32_t)mActiveLights.size(); }
+
         /** Get a list of all active lights in the scene.
         */
         const std::vector<ref<Light>>& getActiveAnalyticLights() const { return mActiveLights; }
+
+        /** Get the number of active lights, emissive lights in the scene.
+        */
+        uint32_t getTotalLightCount() const;
 
         /** Get the light collection representing all the mesh lights in the scene.
             The light collection is created lazily on the first call. It needs a render context.
