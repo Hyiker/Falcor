@@ -17,6 +17,14 @@ target_sources(GBuffer PRIVATE
     GBuffer/GBufferRT.rt.slang
     GBuffer/GBufferRT.slang
 
+    SMPass/DepthPass.3d.slang
+    SMPass/SMPass.cpp
+    SMPass/SMPass.h
+    SMPass/SMPass.slang
+    SMPass/VisPass.cpp
+    SMPass/VisPass.h
+    SMPass/visibilityPass.slang
+
     VBuffer/VBufferRaster.3d.slang
     VBuffer/VBufferRaster.cpp
     VBuffer/VBufferRaster.h

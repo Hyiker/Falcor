@@ -56,6 +56,8 @@ public:
         static SharedPtr create(CopyContext* pCtx, const Texture* pTexture, uint32_t subresourceIndex);
         void getData(void* pData, size_t size) const;
         std::vector<uint8_t> getData() const;
+        template<typename T>
+        std::vector<T> getData() const;
 
     private:
         ReadTextureTask() = default;
@@ -273,4 +275,30 @@ protected:
     std::unique_ptr<LowLevelContextData> mpLowLevelData;
     bool mCommandsPending = false;
 };
+
+template<typename T>
+std::vector<T> CopyContext::ReadTextureTask::getData() const
+{
+    mpFence->wait();
+    // Get buffer data
+    std::vector<T> result;
+    const size_t kTypeSize = sizeof(T);
+    result.resize((size_t)mRowCount * mActualRowSize / kTypeSize);
+    T* pData = reinterpret_cast<T*>(mpBuffer->map());
+
+    for (uint32_t z = 0; z < mDepth; z++)
+    {
+        const T* pSrcZ = pData + z * (size_t)mRowSize * mRowCount;
+        T* pDstZ = result.data() + z * (size_t)mActualRowSize * mRowCount;
+        for (uint32_t y = 0; y < mRowCount; y++)
+        {
+            const T* pSrc = pSrcZ + y * (size_t)mRowSize / kTypeSize;
+            T* pDst = pDstZ + y * (size_t)mActualRowSize / kTypeSize;
+            memcpy(pDst, pSrc, mActualRowSize);
+        }
+    }
+
+    mpBuffer->unmap();
+    return result;
+}
 } // namespace Falcor
