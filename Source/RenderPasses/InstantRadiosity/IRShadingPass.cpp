@@ -159,7 +159,7 @@ void IRShadingPass::executeShadingPass(RenderContext* pRenderContext, const Rend
 
         // Bind static resources.
         auto var = mpShadingPass->getRootVar();
-        mpScene->setRaytracingShaderData(pRenderContext, var);
+        mpScene->bindShaderDataForRaytracing(pRenderContext, var["gScene"]);
         mpSampleGenerator->bindShaderData(var);
         mFrameCount = 0;
     }

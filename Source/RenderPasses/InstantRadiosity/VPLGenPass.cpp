@@ -182,7 +182,8 @@ void VPLGenPass::executeCreatePass(RenderContext* pRenderContext, const RenderDa
 
         // Bind static resources.
         auto var = mpCreateVPLPass->getRootVar();
-        mpScene->setRaytracingShaderData(pRenderContext, var);
+        if (mpScene)
+            mpScene->bindShaderDataForRaytracing(pRenderContext, var["gScene"]);
         mpSampleGenerator->bindShaderData(var);
     }
     ref<Buffer> counterBuffer = static_ref_cast<Buffer>(renderData.getResource("vplCounter"));

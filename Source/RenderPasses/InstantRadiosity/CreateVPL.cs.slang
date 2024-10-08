@@ -58,7 +58,7 @@ bool sampleTriangle(const uint triangleIndex, const float2 u, out LightSample ls
     v.texC = uv;
     v.faceNormalW = ls.normW;
 
-    sd = gScene.materials.prepareShadingData(v, tri.materialID, ls.normW, ExplicitLodTextureSampler(0.f));
+    sd = gScene.materials.prepareShadingData(v, tri.materialID, ls.normW);
 
     return true;
 }
@@ -126,7 +126,7 @@ ShadingData loadShadingData(const HitInfo hit, const float3 rayOrigin, const flo
     }
 #endif
 
-    ShadingData sd = gScene.materials.prepareShadingData(v, materialID, -rayDir, lod);
+    ShadingData sd = gScene.materials.prepareShadingData(v, materialID, -rayDir);
 
     return sd;
 }
@@ -265,9 +265,9 @@ void execute(uint id)
 
         // Trace ray
         SceneRayQuery<kUseAlphaTest> sceneRayQuery;
-        HitInfo hit;
         float hitT;
-        if (!sceneRayQuery.traceRay(ray, hit, hitT, RAY_FLAG_NONE, 0xff))
+        const HitInfo hit = sceneRayQuery.traceRay(ray, hitT, RAY_FLAG_NONE, 0xff);
+        if (!hit.isValid())
         {
             if (retry-- <= 0)
                 break;

@@ -35,12 +35,9 @@ cbuffer CB
 bool traceShadowRay(float3 origin, float3 dir, float distance)
 {
     SceneRayQuery<kUseAlphaTest> sceneRayQuery;
-    HitInfo hit;
-    float hitT;
-
     Ray ray = Ray(origin, dir, 1e-4f, distance - 1e-4f);
 
-    return !sceneRayQuery.traceRay(ray, hit, hitT, RAY_FLAG_NONE, 0xff);
+    return sceneRayQuery.traceVisibilityRay(ray, RAY_FLAG_NONE, 0xff);
 }
 /**
  * Setup ShadingData based on loaded vertex/material attributes for a hit point.
@@ -88,7 +85,7 @@ ShadingData loadShadingData(const HitInfo hit, const float3 rayOrigin, const flo
     }
 #endif
 
-    ShadingData sd = gScene.materials.prepareShadingData(v, materialID, -rayDir, lod);
+    ShadingData sd = gScene.materials.prepareShadingData(v, materialID, -rayDir);
 
     return sd;
 }
