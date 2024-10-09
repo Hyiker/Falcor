@@ -18,7 +18,7 @@ public:
         \param[in] pRenderContext The render context.
         \param[in] pScene The scene.
     */
-    LightCluster(RenderContext* pRenderContext, ref<Scene> pScene);
+    LightCluster(RenderContext* pRenderContext, ref<IScene> pScene);
 
     struct ClusterStats
     {
@@ -55,7 +55,6 @@ public:
     const auto& getLightIndices() const { return mLightIndices; }
 
 protected:
-
     void rebuildClusters(RenderContext* pRenderContext);
 
     using IndexedLight = std::pair<ref<Light>, uint32_t>;
@@ -80,8 +79,12 @@ protected:
 
     // Internal state
     ref<Device> mpDevice;
-    ref<const LightCollection> mpLightCollection;
-    ref<Scene> mpScene;
+    ref<const ILightCollection> mpLightCollection;
+    ref<IScene> mpScene;
+
+    sigs::Connection mUpdateFlagsConnection; ///< Connection to the UpdateFlags signal.
+    /// SceneUpdateFlags accumulated since last `beginFrame()`
+    IScene::UpdateFlags mUpdateFlags = IScene::UpdateFlags::None;
 
     // CPU resources
     mutable std::vector<ClusterNode> mNodes; ///< CPU-side copy of cluster nodes.

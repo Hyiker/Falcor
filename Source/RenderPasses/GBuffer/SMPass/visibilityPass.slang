@@ -200,7 +200,7 @@ GBufferPSOut psMain(VSOut vsOut, uint triangleIndex: SV_PrimitiveID, float3 bary
         discard;
 #endif
     const float3 viewDir = normalize(gScene.camera.getPosition() - v.posW);
-    ShadingData sd = gScene.materials.prepareShadingData(v, vsOut.materialID, viewDir, lod);
+    ShadingData sd = gScene.materials.prepareShadingData(v, vsOut.materialID, viewDir);
 #if ADJUST_SHADING_NORMALS
     adjustShadingNormal(sd, sd.frame);
 #endif

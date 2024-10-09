@@ -129,7 +129,7 @@ void LightSample::executeCompute(RenderContext* pRenderContext, const RenderData
         uint3 sz = mpComputePass->getThreadGroupSize();
         // std::cout << to_string(sz) << std::endl;
         // Bind static resources
-        mpScene->setRaytracingShaderData(pRenderContext, mpComputePass->getRootVar());
+        mpScene->bindShaderDataForRaytracing(pRenderContext, mpComputePass->getRootVar()["gScene"]);
     }
     if (mpScene->getEnvMap() != nullptr)
     {

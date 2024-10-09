@@ -130,7 +130,7 @@ void psMain(VSOutSM vsOut, uint triangleIndex : SV_PrimitiveID, float3 barycentr
     if (gScene.materials.alphaTest(v, vsOut.materialID, lod)) discard;
 #endif
     const float3 viewDir = normalize(gScene.camera.getPosition() - v.posW);
-    ShadingData sd = gScene.materials.prepareShadingData(v, vsOut.materialID, viewDir, lod);
+    ShadingData sd = gScene.materials.prepareShadingData(v, vsOut.materialID, viewDir);
 
 #if ADJUST_SHADING_NORMALS
 

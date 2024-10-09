@@ -140,7 +140,7 @@ void VPLVisibilityPass::execute(RenderContext* pRenderContext, const RenderData&
 
         // Bind static resources.
         auto var = mpVisibilityPass->getRootVar();
-        mpScene->setRaytracingShaderData(pRenderContext, var);
+        mpScene->bindShaderDataForRaytracing(pRenderContext, var["gScene"]);;
         mpSampleGenerator->bindShaderData(var);
     }
 

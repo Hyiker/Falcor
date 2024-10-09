@@ -32,9 +32,11 @@ static uint64_t mortonCode(uint32_t a)
     return x;
 }
 
-LightCluster::LightCluster(RenderContext* pRenderContext, ref<Scene> pScene)
-    : mpDevice(pScene->getDevice()), mpLightCollection(pScene->getLightCollection(pRenderContext)), mpScene(pScene)
-{}
+LightCluster::LightCluster(RenderContext* pRenderContext, ref<IScene> pScene)
+    : mpDevice(pScene->getDevice()), mpLightCollection(pScene->getILightCollection(pRenderContext)), mpScene(pScene)
+{
+    mUpdateFlagsConnection = mpScene->getUpdateFlagsSignal().connect([&](IScene::UpdateFlags flags) { mUpdateFlags |= flags; });
+}
 
 void LightCluster::renderUI(Gui::Widgets& widget)
 {
@@ -49,7 +51,7 @@ bool LightCluster::update(RenderContext* pRenderContext)
     bool clusterChanged = false;
 
     // Check if light collection has changed.
-    if (is_set(mpScene->getUpdates(), Scene::UpdateFlags::LightsMoved))
+    if (is_set(mUpdateFlags, Scene::UpdateFlags::LightsMoved))
     {
         mNeedsRebuild = true;
     }
@@ -67,7 +69,7 @@ bool LightCluster::update(RenderContext* pRenderContext)
 void LightCluster::rebuildClusters(RenderContext* pRenderContext)
 {
     const int kDesiredClusterCount = 300;
-    uint32_t analyticLightCount = mpScene->getLightCount();
+    uint32_t analyticLightCount = mpScene->getActiveAnalyticLights().size();
     const int kDesiredClusterSize = std::max(1, int(analyticLightCount) / kDesiredClusterCount);
     mNodes.clear();
     const float sceneRadius = mpScene->getSceneBounds().radius();
@@ -76,7 +78,7 @@ void LightCluster::rebuildClusters(RenderContext* pRenderContext)
     std::vector<IndexedLight> lights(analyticLightCount);
     for (size_t i = 0; i < lights.size(); i++)
     {
-        lights[i] = std::make_pair(mpScene->getLight(i), (uint32_t)i);
+        lights[i] = std::make_pair(mpScene->getActiveAnalyticLights()[i], (uint32_t)i);
     }
 
     // Sort lights with morton encode for better locality.
