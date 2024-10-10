@@ -113,7 +113,6 @@ ProgramManager::ProgramManager(Device* pDevice) : mpDevice(pDevice)
     };
 
     addGlobalDefines(globalDefines);
-
 }
 
 ref<const ProgramVersion> ProgramManager::createProgramVersion(const Program& program, std::string& log) const
@@ -769,6 +768,16 @@ SlangCompileRequest* ProgramManager::createSlangCompileRequest(const Program& pr
     SlangCompileRequest* pSlangRequest = nullptr;
     pSlangSession->createCompileRequest(&pSlangRequest);
     FALCOR_ASSERT(pSlangRequest);
+
+    // TODO slang floods warnings without these lines
+    // https://github.com/NVIDIAGameWorks/Falcor/issues/450
+    spOverrideDiagnosticSeverity(pSlangRequest, 15602, SLANG_SEVERITY_DISABLED);
+    spOverrideDiagnosticSeverity(pSlangRequest, 30056, SLANG_SEVERITY_DISABLED);
+    spOverrideDiagnosticSeverity(pSlangRequest, 30081, SLANG_SEVERITY_DISABLED);
+    spOverrideDiagnosticSeverity(pSlangRequest, 41016, SLANG_SEVERITY_DISABLED);
+    spOverrideDiagnosticSeverity(pSlangRequest, 41021, SLANG_SEVERITY_DISABLED);
+    spOverrideDiagnosticSeverity(pSlangRequest, 41203, SLANG_SEVERITY_DISABLED);
+
 
     // Enable/disable intermediates dump
     bool dumpIR = is_set(program.mDesc.compilerFlags, SlangCompilerFlags::DumpIntermediates);
