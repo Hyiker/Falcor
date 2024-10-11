@@ -1258,8 +1258,7 @@ bool PathTracer::prepareLighting(RenderContext* pRenderContext)
     {
         if (!mpLightCluster)
         {
-            FALCOR_ASSERT(mpScene && mpScene->getLightCount() > 0);
-            FALCOR_ASSERT(!mpLightCluster);
+            FALCOR_ASSERT(mpScene && mpScene->getActiveAnalyticLights().size() > 0);
 
             mpLightCluster = make_ref<LightCluster>(pRenderContext, mpScene);
             lightingChanged = true;
