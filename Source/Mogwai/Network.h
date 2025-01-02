@@ -3,39 +3,28 @@
 #include <string>
 #include <thread>
 
-#include <libwebsockets.h>
+#include "Falcor.h"
 #include "Core/Enum.h"
 #include "Utils/Timing/Clock.h"
 
 namespace Mogwai
 {
-enum class NetworkRequestType : uint8_t
-{
-    FrameSync = 0,
-    AssetsSync = 1,
-};
-FALCOR_ENUM_INFO(NetworkRequestType, {{NetworkRequestType::FrameSync, "FrameSync"}, {NetworkRequestType::AssetsSync, "AssetsSync"}});
+
+using namespace Falcor;
 class NetworkServer
 {
 public:
-    using Clock = Falcor::Clock;
+    NetworkServer(int port);
 
-    NetworkServer(const std::string& host, int port, Clock& clock);
+    void setScene(ref<Scene> pScene);
 
-    /** Dispatch the request
-     */
-    std::string dispatch(const std::string& clientMsg) const;
+    bool receiveUpdate();
 
     ~NetworkServer();
 
 private:
-    double getSceneAnimationTime() const;
+    void doAccept();
 
-    Falcor::Clock& mClock; ///< Global clock reference for animation sync.
-
-    lws_context* mpWebSocketContext = nullptr;
-    std::atomic_bool mServerStop = false;
-
-    std::unique_ptr<std::thread> mpServerThread;
+    ref<Scene> mpScene;
 };
 } // namespace Mogwai

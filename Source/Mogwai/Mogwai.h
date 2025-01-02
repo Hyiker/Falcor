@@ -206,7 +206,7 @@ namespace Mogwai
         FILE*       mPipedOutput = nullptr;
 
         // Network server
-        NetworkServer mServer;
+        std::unique_ptr<NetworkServer> mpNetwork;
 
         // Scripting
         void registerScriptBindings(pybind11::module& m);

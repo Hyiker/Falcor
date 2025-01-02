@@ -48,20 +48,6 @@ add_subdirectory(pybind11)
 # vulkan-headers
 add_subdirectory(vulkan-headers)
 
-# libwebsocket
-message(STATUS "Configure libwebsockets")
-set(LWS_WITHOUT_TESTAPPS ON)
-set(LWS_WITHOUT_TEST_SERVER ON)
-set(LWS_WITHOUT_TEST_SERVER_EXTPOLL ON)
-set(LWS_WITHOUT_TEST_PING ON)
-set(LWS_WITHOUT_TEST_CLIENT ON)
-set(LWS_WITH_SSL OFF)
-set(LWS_WITHOUT_CLIENT ON)
-set(LWS_WITHOUT_TEST_PING ON)
-set(LWS_WITHOUT_TEST_CLIENT ON)
-
-add_subdirectory(libwebsockets)
-
 
 # -----------------------------------------------------------------------------
 # Dependencies in local files

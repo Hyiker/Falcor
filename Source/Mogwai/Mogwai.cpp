@@ -60,10 +60,10 @@ const std::filesystem::path kAppDataPath = getAppDataDirectory() / "NVIDIA/Falco
 
 size_t Renderer::DebugWindow::index = 0;
 
-Renderer::Renderer(const SampleAppConfig& config, const Options& options)
-    : SampleApp(config), mOptions(options), mAppData(kAppDataPath), mServer("0.0.0.0", 8087, getGlobalClock())
+Renderer::Renderer(const SampleAppConfig& config, const Options& options) : SampleApp(config), mOptions(options), mAppData(kAppDataPath)
 {
     setActivePythonRenderGraphDevice(getDevice());
+    mpNetwork = std::make_unique<NetworkServer>(8087);
 }
 
 Renderer::~Renderer()
@@ -624,6 +624,7 @@ void Renderer::setScene(const ref<Scene>& pScene)
             mpSampler = getDevice()->createSampler(desc);
         }
         mpScene->getMaterialSystem().setDefaultTextureSampler(mpSampler);
+        mpNetwork->setScene(pScene);
     }
 
     for (auto& g : mGraphs)
@@ -712,6 +713,8 @@ void Renderer::endFrame(RenderContext* pRenderContext, const ref<Fbo>& pTargetFb
 
 void Renderer::onFrameRender(RenderContext* pRenderContext, const ref<Fbo>& pTargetFbo)
 {
+    mpNetwork->receiveUpdate();
+
     if (!mScriptPath.empty())
     {
         auto path = mScriptPath;

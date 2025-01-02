@@ -19,6 +19,8 @@ target_sources(Mogwai PRIVATE
     Extensions/Profiler/TimingCapture.h
 )
 
-target_link_libraries(Mogwai PRIVATE args websockets ${LIBWEBSOCKETS_DEP_LIBS})
+find_package(Boost REQUIRED COMPONENTS system)
+
+target_link_libraries(Mogwai PRIVATE args Boost::boost Boost::system)
 
 target_source_group(Mogwai "/")
