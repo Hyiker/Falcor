@@ -713,6 +713,7 @@ void Renderer::endFrame(RenderContext* pRenderContext, const ref<Fbo>& pTargetFb
 
 void Renderer::onFrameRender(RenderContext* pRenderContext, const ref<Fbo>& pTargetFbo)
 {
+    // Receive scene sync request
     mpNetwork->receiveUpdate();
 
     if (!mScriptPath.empty())
@@ -794,6 +795,9 @@ void Renderer::onFrameRender(RenderContext* pRenderContext, const ref<Fbo>& pTar
     }
 
     endFrame(pRenderContext, pTargetFbo);
+
+    // respond update
+    mpNetwork->sendData();
 }
 
 bool Renderer::onMouseEvent(const MouseEvent& mouseEvent)

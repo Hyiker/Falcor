@@ -20,6 +20,8 @@ public:
 
     bool receiveUpdate();
 
+    void sendData();
+
     ~NetworkServer();
 
 private:

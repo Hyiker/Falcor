@@ -116,6 +116,8 @@ namespace Falcor
 
         void updateFromAnimation(const float4x4& transform) override {}
 
+        void setColor(const float3& color);
+
     protected:
         Light(const std::string& name, LightType type);
 

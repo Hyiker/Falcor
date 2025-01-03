@@ -105,6 +105,12 @@ namespace Falcor
         return mUiLightIntensityColor;
     }
 
+    void Light::setColor(const float3& color)
+    {
+        mUiLightIntensityColor = color;
+        setIntensity(mUiLightIntensityColor * mUiLightIntensityScale);
+    }
+
     void Light::setColorFromUI(const float3& uiColor)
     {
         mUiLightIntensityColor = uiColor;
